@@ -1,0 +1,160 @@
+:root{
+  --vv-card: rgba(255,255,255,0.04);
+  --vv-card-border: rgba(255,255,255,0.06);
+  --vv-soft: rgba(255,255,255,0.06);
+  --vv-shadow: 0 14px 40px rgba(0,0,0,0.35);
+}
+
+@media (prefers-color-scheme: light){
+  :root{
+    --vv-card: rgba(12,16,32,0.04);
+    --vv-card-border: rgba(12,16,32,0.10);
+    --vv-soft: rgba(12,16,32,0.06);
+    --vv-shadow: 0 14px 40px rgba(12,16,32,0.12);
+  }
+}
+
+.st-key-vv-hero-card, .st-key-vv-card, .st-key-vv-card-tight {
+  border: 1px solid var(--vv-card-border);
+  background: var(--vv-card);
+  border-radius: 14px;
+  box-shadow: var(--vv-shadow);
+}
+
+.st-key-vv-card { padding: 14px 14px 10px 14px; }
+.st-key-vv-card-tight { padding: 10px 10px 8px 10px; }
+.st-key-vv-hero-card { padding: 18px; }
+
+.vv-muted { opacity: 0.72; }
+.vv-tight { line-height: 1.15; }
+.vv-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+.vv-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--vv-card-border);
+  background: var(--vv-soft);
+}
+
+.vv-turntable {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  padding: 10px 0 0 0;
+}
+
+.vv-deck {
+  width: min(440px, 92%);
+  aspect-ratio: 1 / 1;
+  border-radius: 24px;
+  position: relative;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.12), rgba(255,255,255,0.02) 55%, rgba(0,0,0,0.02));
+  border: 1px solid var(--vv-card-border);
+  overflow: hidden;
+  box-shadow: var(--vv-shadow);
+}
+
+.vv-deck::before{
+  content:"";
+  position:absolute;
+  inset:-40% -40% auto auto;
+  width: 70%;
+  height: 70%;
+  background: radial-gradient(circle, rgba(167,139,250,0.22), rgba(0,0,0,0) 60%);
+  filter: blur(12px);
+  pointer-events:none;
+}
+
+.vv-platter {
+  width: 74%;
+  height: 74%;
+  border-radius: 999px;
+  position: absolute;
+  inset: 13% auto auto 13%;
+  background:
+    radial-gradient(circle at center,
+      rgba(255,255,255,0.16) 0 8%,
+      rgba(0,0,0,0.02) 9% 11%,
+      rgba(255,255,255,0.09) 12% 13%,
+      rgba(0,0,0,0.03) 14% 100%),
+    repeating-radial-gradient(circle at center,
+      rgba(255,255,255,0.07) 0 2px,
+      rgba(0,0,0,0) 2px 8px);
+  border: 1px solid rgba(255,255,255,0.12);
+  transform-origin: center;
+}
+
+.vv-label {
+  width: 28%;
+  height: 28%;
+  border-radius: 999px;
+  position: absolute;
+  inset: 36% auto auto 36%;
+  background: radial-gradient(circle at 30% 30%, rgba(167,139,250,0.9), rgba(109,40,217,0.75));
+  border: 1px solid rgba(255,255,255,0.22);
+  display: grid;
+  place-items: center;
+  color: rgba(255,255,255,0.92);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vv-spindle {
+  width: 3.5%;
+  height: 3.5%;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.88);
+  box-shadow: 0 0 0 4px rgba(0,0,0,0.08) inset;
+}
+
+.vv-arm {
+  position: absolute;
+  right: 7%;
+  top: 14%;
+  width: 44%;
+  height: 44%;
+  transform-origin: 20% 20%;
+  transform: rotate(18deg);
+  opacity: 0.92;
+}
+
+.vv-arm::before{
+  content:"";
+  position:absolute;
+  width: 70%;
+  height: 10px;
+  left: 18%;
+  top: 22%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.32), rgba(255,255,255,0.10));
+  border: 1px solid rgba(255,255,255,0.16);
+}
+
+.vv-arm::after{
+  content:"";
+  position:absolute;
+  width: 56px;
+  height: 30px;
+  left: 66%;
+  top: 14%;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.14);
+}
+
+.vv-spin .vv-platter{
+  animation: vvspin 1.8s linear infinite;
+}
+
+.vv-spin-45 .vv-platter{
+  animation: vvspin 1.25s linear infinite;
+}
+
+@keyframes vvspin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
