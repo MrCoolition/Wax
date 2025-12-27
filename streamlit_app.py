@@ -155,6 +155,15 @@ def _write_json(path: Path, obj: dict) -> None:
     _atomic_write_text(path, json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def _parse_json_payload(text: str) -> dict:
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+
+
 def _load_library() -> dict:
     data = _read_json(DB_PATH)
     if not data or "records" not in data:
@@ -270,16 +279,17 @@ def _build_virtuoso_prompt(records: List[dict]) -> str:
     context = _build_vault_context(records)
     digest = _build_vault_digest(records)
     return (
-        "You are Vinyl Virtuoso, an expert guide to a user's vinyl collection. "
+        "You are the Vinyl Virtuoso, an expert guide to a user's vinyl collection. "
         "Answer with friendly, confident detail while staying grounded in the vault data. "
         "If asked about records that are not present, say so and suggest related entries "
-        "that are present. If the user asks you to change the vault, explain that you "
-        "can only analyze and recommend; the user should use the app to edit records.\n"
+        "that are present. When the user wants to update the vault, confirm what you "
+        "changed and keep the tone calm, immersive, and relaxing.\n"
         "Response guidelines:\n"
         "- Lead with a direct answer, then add supporting detail or a short list.\n"
         "- Offer 1-3 recommendations when appropriate, each with a clear reason tied to the data.\n"
         "- If the request is ambiguous, make a sensible assumption and state it briefly.\n"
         "- Keep responses concise and avoid inventing details not in the vault.\n"
+        "- Use soothing, confident language that makes the user feel relaxed and in control.\n"
         "Vault digest:\n"
         f"{digest}\n"
         "Vault data (JSON):\n"
@@ -287,15 +297,135 @@ def _build_virtuoso_prompt(records: List[dict]) -> str:
     )
 
 
-def _render_virtuoso(records: List[dict]) -> None:
-    st.subheader("🎛️ Vinyl Virtuoso")
-    st.caption("Ask for listening picks, pressings to revisit, or insights from your vault.")
+def _build_wax_wizard_prompt(records: List[dict]) -> str:
+    context = _build_vault_context(records)
+    digest = _build_vault_digest(records)
+    return (
+        "You are Wax Wizard, the user's Vinyl Virtuoso with full control of the Vinyl Vault. "
+        "Interpret requests to add, update, or delete records. "
+        "Return JSON that includes a calming assistant reply and a list of actions.\n"
+        "Rules:\n"
+        "- Only include actions when the user clearly wants a change.\n"
+        "- Use action types: add, update, delete.\n"
+        "- For add: include artist, album, year (or null), genre, rating (0-5), notes.\n"
+        "- For update/delete: include a match object with artist, album, year, or id.\n"
+        "- Keep assistant_reply immersive and reassuring.\n"
+        "Vault digest:\n"
+        f"{digest}\n"
+        "Vault data (JSON):\n"
+        f"{context}"
+    )
+
+
+def _normalize_text(value: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _match_records(records: List[dict], match: Dict[str, Any]) -> List[dict]:
+    if not match:
+        return []
+    match_id = _normalize_text(match.get("id"))
+    match_artist = _normalize_text(match.get("artist"))
+    match_album = _normalize_text(match.get("album"))
+    match_year = match.get("year")
+
+    matched = []
+    for record in records:
+        if match_id and _normalize_text(record.get("id")) != match_id:
+            continue
+        if match_artist and _normalize_text(record.get("artist")) != match_artist:
+            continue
+        if match_album and _normalize_text(record.get("album")) != match_album:
+            continue
+        if match_year is not None and record.get("year") != match_year:
+            continue
+        matched.append(record)
+    return matched
+
+
+def _apply_vault_actions(library: dict, actions: List[dict]) -> Dict[str, List[str]]:
+    results: Dict[str, List[str]] = {"added": [], "updated": [], "deleted": [], "skipped": []}
+    records = library.get("records", [])
+    for action in actions:
+        action_type = (action.get("action") or "").lower()
+        if action_type == "add":
+            record = action.get("record") or {}
+            new_record = {
+                "id": uuid.uuid4().hex,
+                "artist": (record.get("artist") or "Unknown Artist").strip(),
+                "album": (record.get("album") or "Untitled Album").strip(),
+                "year": record.get("year"),
+                "genre": (record.get("genre") or "").strip(),
+                "rating": _safe_int(record.get("rating"), default=0),
+                "notes": (record.get("notes") or "").strip(),
+                "added_at": _iso_now(),
+            }
+            records.append(new_record)
+            results["added"].append(_record_summary(new_record))
+        elif action_type in {"update", "delete"}:
+            match = action.get("match") or {}
+            matched = _match_records(records, match)
+            if not matched:
+                results["skipped"].append(f"{action_type}: no match for {match}")
+                continue
+            if action_type == "delete":
+                ids = {r.get("id") for r in matched}
+                library["records"] = [r for r in records if r.get("id") not in ids]
+                for record in matched:
+                    results["deleted"].append(_record_summary(record))
+                records = library["records"]
+            else:
+                updates = action.get("updates") or {}
+                for record in matched:
+                    if "artist" in updates:
+                        record["artist"] = (updates.get("artist") or record.get("artist") or "").strip()
+                    if "album" in updates:
+                        record["album"] = (updates.get("album") or record.get("album") or "").strip()
+                    if "year" in updates:
+                        record["year"] = updates.get("year")
+                    if "genre" in updates:
+                        record["genre"] = (updates.get("genre") or "").strip()
+                    if "rating" in updates:
+                        record["rating"] = _safe_int(updates.get("rating"), default=record.get("rating", 0))
+                    if "notes" in updates:
+                        record["notes"] = (updates.get("notes") or "").strip()
+                    results["updated"].append(_record_summary(record))
+        else:
+            results["skipped"].append(f"Unknown action: {action}")
+
+    if results["added"] or results["updated"] or results["deleted"]:
+        _save_library(library)
+    return results
+
+
+def _summarize_action_results(results: Dict[str, List[str]]) -> str:
+    lines = []
+    if results["added"]:
+        lines.append("Added:")
+        lines.extend([f"- {item}" for item in results["added"]])
+    if results["updated"]:
+        lines.append("Updated:")
+        lines.extend([f"- {item}" for item in results["updated"]])
+    if results["deleted"]:
+        lines.append("Deleted:")
+        lines.extend([f"- {item}" for item in results["deleted"]])
+    if results["skipped"]:
+        lines.append("Skipped:")
+        lines.extend([f"- {item}" for item in results["skipped"]])
+    return "\n".join(lines).strip()
+
+
+def _render_virtuoso(library: dict, records: List[dict]) -> None:
+    st.subheader("🪄 Wax Wizard")
+    st.caption(
+        "Slip into the groove. Ask for picks, vault insights, or tell the wizard what to update."
+    )
 
     api_key = _get_openai_key()
     model = st.text_input(
         "Model",
         value=DEFAULT_OPENAI_MODEL,
-        help="Defaults to GPT-5.2 for Vinyl Virtuoso.",
+        help="Defaults to GPT-5.2 for Wax Wizard.",
         key="virtuoso_model",
     )
     reasoning_effort = st.selectbox(
@@ -321,7 +451,7 @@ def _render_virtuoso(records: List[dict]) -> None:
             with st.chat_message(message["role"]):
                 st.write(message["content"])
 
-        prompt = st.chat_input("Ask Vinyl Virtuoso about your records")
+        prompt = st.chat_input("Tell the Wax Wizard what you need")
         if prompt:
             st.session_state["virtuoso_messages"].append({"role": "user", "content": prompt})
             with st.chat_message("user"):
@@ -332,23 +462,96 @@ def _render_virtuoso(records: List[dict]) -> None:
                     st.warning("Add an OpenAI API key to enable Vinyl Virtuoso.")
                 return
 
-            system_prompt = _build_virtuoso_prompt(records)
             with st.chat_message("assistant"):
                 with st.spinner("Digging through the vault..."):
                     client = OpenAI(api_key=api_key)
-                    response = client.responses.create(
+                    command_response = client.responses.create(
                         model=model,
                         input=[
-                            {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": _build_wax_wizard_prompt(records)},
                             *st.session_state["virtuoso_messages"],
                         ],
+                        response_format={
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "wax_wizard_actions",
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "assistant_reply": {"type": "string"},
+                                        "actions": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "action": {
+                                                        "type": "string",
+                                                        "enum": ["add", "update", "delete"],
+                                                    },
+                                                    "record": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "artist": {"type": "string"},
+                                                            "album": {"type": "string"},
+                                                            "year": {"type": ["integer", "null"]},
+                                                            "genre": {"type": "string"},
+                                                            "rating": {"type": "integer"},
+                                                            "notes": {"type": "string"},
+                                                        },
+                                                        "required": ["artist", "album"],
+                                                    },
+                                                    "match": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "artist": {"type": "string"},
+                                                            "album": {"type": "string"},
+                                                            "year": {"type": ["integer", "null"]},
+                                                        },
+                                                    },
+                                                    "updates": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "artist": {"type": "string"},
+                                                            "album": {"type": "string"},
+                                                            "year": {"type": ["integer", "null"]},
+                                                            "genre": {"type": "string"},
+                                                            "rating": {"type": "integer"},
+                                                            "notes": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
+                                                "required": ["action"],
+                                            },
+                                        },
+                                    },
+                                    "required": ["assistant_reply", "actions"],
+                                },
+                            },
+                        },
                         reasoning={"effort": reasoning_effort},
                     )
-                    assistant_text = response.output_text or ""
+                    command_payload = _parse_json_payload(command_response.output_text or "")
+                    assistant_reply = command_payload.get("assistant_reply", "")
+                    actions = command_payload.get("actions") or []
+                    action_results = _apply_vault_actions(library, actions)
+                    action_summary = _summarize_action_results(action_results)
+
+                    if not assistant_reply:
+                        assistant_reply = (
+                            "I'm here with the lights low and the needle ready. "
+                            "Tell me what you'd like to spin or change in the vault."
+                        )
+                    assistant_text = assistant_reply
+                    if action_summary:
+                        assistant_text = f"{assistant_text}\n\nVault update results:\n{action_summary}"
+
                     st.write(assistant_text)
                     st.session_state["virtuoso_messages"].append(
                         {"role": "assistant", "content": assistant_text}
                     )
+                    if action_results["added"] or action_results["updated"] or action_results["deleted"]:
+                        st.rerun()
 
 
 def _filtered_records(records: List[dict], query: str, genres: List[str]) -> List[dict]:
@@ -377,7 +580,10 @@ def _filtered_records(records: List[dict], query: str, genres: List[str]) -> Lis
 
 st.set_page_config(page_title="Vinyl Vault", page_icon="🎧", layout="wide")
 st.title("🎧 Vinyl Vault")
-st.caption("Keep your vinyl collection organized with quick summaries, labels, and QR codes.")
+st.caption(
+    "Slip into a calm groove while the Wax Wizard keeps your collection organized, "
+    "with quick summaries, labels, and QR codes."
+)
 
 library = _load_library()
 records = library.get("records", [])
@@ -543,4 +749,4 @@ else:
     st.info("No records match your filters.")
 
 st.divider()
-_render_virtuoso(records)
+_render_virtuoso(library, records)
