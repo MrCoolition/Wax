@@ -249,13 +249,40 @@ def _build_vault_context(records: List[dict]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _build_vault_digest(records: List[dict]) -> str:
+    if not records:
+        return "No records yet."
+    lines = []
+    for record in records:
+        artist = record.get("artist", "Unknown")
+        album = record.get("album", "Untitled")
+        year = record.get("year")
+        genre = record.get("genre") or "Unknown genre"
+        rating = record.get("rating") or 0
+        notes = record.get("notes") or ""
+        year_text = f" ({year})" if year else ""
+        note_text = f" — {notes}" if notes else ""
+        lines.append(f"- {artist} — {album}{year_text} · {genre} · {_stars(rating)}{note_text}")
+    return "\n".join(lines)
+
+
 def _build_virtuoso_prompt(records: List[dict]) -> str:
     context = _build_vault_context(records)
+    digest = _build_vault_digest(records)
     return (
         "You are Vinyl Virtuoso, an expert guide to a user's vinyl collection. "
-        "Use the vault data below to answer questions, offer recommendations, "
-        "and surface details. If asked about records that are not present, say "
-        "so and suggest related entries. Vault data:\n"
+        "Answer with friendly, confident detail while staying grounded in the vault data. "
+        "If asked about records that are not present, say so and suggest related entries "
+        "that are present. If the user asks you to change the vault, explain that you "
+        "can only analyze and recommend; the user should use the app to edit records.\n"
+        "Response guidelines:\n"
+        "- Lead with a direct answer, then add supporting detail or a short list.\n"
+        "- Offer 1-3 recommendations when appropriate, each with a clear reason tied to the data.\n"
+        "- If the request is ambiguous, make a sensible assumption and state it briefly.\n"
+        "- Keep responses concise and avoid inventing details not in the vault.\n"
+        "Vault digest:\n"
+        f"{digest}\n"
+        "Vault data (JSON):\n"
         f"{context}"
     )
 
@@ -309,7 +336,7 @@ def _render_virtuoso(records: List[dict]) -> None:
                             {"role": "system", "content": system_prompt},
                             *st.session_state["virtuoso_messages"],
                         ],
-                        temperature=0.4,
+                        temperature=0.3,
                     )
                     assistant_text = response.choices[0].message.content or ""
                     st.write(assistant_text)
