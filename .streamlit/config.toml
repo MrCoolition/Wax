@@ -7,46 +7,8 @@ showSidebarNavigation = true
 
 [theme]
 base = "dark"
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
-headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
-codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
-baseFontSize = 16
-baseFontWeight = 400
-showSidebarBorder = true
-baseRadius = 10
-buttonRadius = 999
-linkUnderline = false
-chartCategoricalColors = ["#7C3AED", "#06B6D4", "#F97316", "#22C55E", "#F43F5E", "#60A5FA", "#A78BFA", "#FBBF24"]
-chartSequentialColors = ["#0EA5E9", "#6366F1", "#A855F7", "#EC4899", "#F97316"]
-
-[theme.dark]
 primaryColor = "#A78BFA"
 backgroundColor = "#0B0D12"
 secondaryBackgroundColor = "#111522"
 textColor = "#E8EAF0"
-codeTextColor = "#D8DDF0"
-codeBackgroundColor = "#0F1320"
-dataframeHeaderBackgroundColor = "#0F1320"
-dataframeBorderColor = "#1D2536"
-
-[theme.dark.sidebar]
-backgroundColor = "#0B0D12"
-secondaryBackgroundColor = "#0F1320"
-textColor = "#E8EAF0"
-primaryColor = "#A78BFA"
-
-[theme.light]
-primaryColor = "#6D28D9"
-backgroundColor = "#FBFBFE"
-secondaryBackgroundColor = "#F2F4FA"
-textColor = "#0D1020"
-codeTextColor = "#111827"
-codeBackgroundColor = "#EEF2FF"
-dataframeHeaderBackgroundColor = "#EEF2FF"
-dataframeBorderColor = "#D6DAE8"
-
-[theme.light.sidebar]
-backgroundColor = "#FBFBFE"
-secondaryBackgroundColor = "#EEF2FF"
-textColor = "#0D1020"
-primaryColor = "#6D28D9"
+font = "sans serif"
