@@ -18,6 +18,7 @@ import pandas as pd
 import qrcode
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
+from openai import OpenAI
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
@@ -127,6 +128,7 @@ DATA_DIR = _resolve_data_root()
 DB_PATH = DATA_DIR / "vinyl_vault.json"
 MEDIA_DIR = DATA_DIR / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_OPENAI_MODEL = "gpt-5.2"
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -221,6 +223,99 @@ def _record_summary(record: dict) -> str:
     year = record.get("year")
     year_text = f" ({year})" if year else ""
     return f"{record.get('artist', 'Unknown')} — {record.get('album', 'Untitled')}{year_text}"
+
+
+def _get_openai_key() -> str:
+    if "openai_api_key" in st.secrets:
+        return st.secrets["openai_api_key"]
+    return os.getenv("OPENAI_API_KEY", "")
+
+
+def _build_vault_context(records: List[dict]) -> str:
+    if not records:
+        return "The Vinyl Vault is currently empty."
+    payload = [
+        {
+            "artist": record.get("artist"),
+            "album": record.get("album"),
+            "year": record.get("year"),
+            "genre": record.get("genre"),
+            "rating": record.get("rating"),
+            "notes": record.get("notes"),
+            "added_at": record.get("added_at"),
+        }
+        for record in records
+    ]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_virtuoso_prompt(records: List[dict]) -> str:
+    context = _build_vault_context(records)
+    return (
+        "You are Vinyl Virtuoso, an expert guide to a user's vinyl collection. "
+        "Use the vault data below to answer questions, offer recommendations, "
+        "and surface details. If asked about records that are not present, say "
+        "so and suggest related entries. Vault data:\n"
+        f"{context}"
+    )
+
+
+def _render_virtuoso(records: List[dict]) -> None:
+    st.subheader("🎛️ Vinyl Virtuoso")
+    st.caption("Ask for listening picks, pressings to revisit, or insights from your vault.")
+
+    api_key = _get_openai_key()
+    model = st.text_input(
+        "Model",
+        value=DEFAULT_OPENAI_MODEL,
+        help="Defaults to GPT-5.2 for Vinyl Virtuoso.",
+        key="virtuoso_model",
+    )
+
+    if not api_key:
+        st.info("Add your OpenAI API key to secrets as `openai_api_key` to enable chat.")
+
+    if "virtuoso_messages" not in st.session_state:
+        st.session_state["virtuoso_messages"] = []
+
+    chat_col, action_col = st.columns([4, 1])
+    with action_col:
+        if st.button("Clear chat", use_container_width=True):
+            st.session_state["virtuoso_messages"] = []
+
+    with chat_col:
+        for message in st.session_state["virtuoso_messages"]:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+
+        prompt = st.chat_input("Ask Vinyl Virtuoso about your records")
+        if prompt:
+            st.session_state["virtuoso_messages"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.write(prompt)
+
+            if not api_key:
+                with st.chat_message("assistant"):
+                    st.warning("Add an OpenAI API key to enable Vinyl Virtuoso.")
+                return
+
+            system_prompt = _build_virtuoso_prompt(records)
+            with st.chat_message("assistant"):
+                with st.spinner("Digging through the vault..."):
+                    client = OpenAI(api_key=api_key)
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            *st.session_state["virtuoso_messages"],
+                        ],
+                        temperature=0.4,
+                    )
+                    assistant_text = response.choices[0].message.content or ""
+                    st.write(assistant_text)
+                    st.session_state["virtuoso_messages"].append(
+                        {"role": "assistant", "content": assistant_text}
+                    )
 
 
 def _filtered_records(records: List[dict], query: str, genres: List[str]) -> List[dict]:
@@ -413,3 +508,6 @@ if filtered:
             st.rerun()
 else:
     st.info("No records match your filters.")
+
+st.divider()
+_render_virtuoso(records)
