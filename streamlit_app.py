@@ -383,7 +383,9 @@ if filtered:
             ensure_ascii=False,
         )
         qr_img = qrcode.make(qr_payload)
-        st.image(qr_img, caption="QR: record details", width=180)
+        qr_buffer = io.BytesIO()
+        qr_img.get_image().save(qr_buffer, format="PNG")
+        st.image(qr_buffer.getvalue(), caption="QR: record details", width=180)
     with tool_cols[2]:
         pdf_bytes = _build_label_pdf(record)
         st.download_button(
