@@ -158,9 +158,19 @@ def _write_json(path: Path, obj: dict) -> None:
 def _parse_json_payload(text: str) -> dict:
     if not text:
         return {}
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
     try:
-        return json.loads(text)
+        return json.loads(cleaned)
     except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return {}
         return {}
 
 
@@ -473,17 +483,21 @@ def _render_virtuoso(library: dict, records: List[dict]) -> None:
                         ],
                         reasoning={"effort": reasoning_effort},
                     )
-                    command_payload = _parse_json_payload(command_response.output_text or "")
-                    assistant_reply = command_payload.get("assistant_reply", "")
+                    raw_text = (command_response.output_text or "").strip()
+                    command_payload = _parse_json_payload(raw_text)
+                    assistant_reply = (command_payload.get("assistant_reply") or "").strip()
                     actions = command_payload.get("actions") or []
                     action_results = _apply_vault_actions(library, actions)
                     action_summary = _summarize_action_results(action_results)
 
                     if not assistant_reply:
-                        assistant_reply = (
-                            "I'm here with the lights low and the needle ready. "
-                            "Tell me what you'd like to spin or change in the vault."
-                        )
+                        if raw_text and not raw_text.lstrip().startswith("{"):
+                            assistant_reply = raw_text
+                        else:
+                            assistant_reply = (
+                                "I'm here with the lights low and the needle ready. "
+                                "Tell me what you'd like to spin or change in the vault."
+                            )
                     assistant_text = assistant_reply
                     if action_summary:
                         assistant_text = f"{assistant_text}\n\nVault update results:\n{action_summary}"
