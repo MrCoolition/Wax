@@ -272,7 +272,7 @@ with st.sidebar:
         }
         _add_record(library, record)
         st.success("Saved to Vinyl Vault.")
-        st.experimental_rerun()
+        st.rerun()
 
     st.divider()
     st.header("Bulk add")
@@ -316,7 +316,7 @@ with st.sidebar:
                 + "\n".join(f"• {line}" for line in skipped)
             )
         if added:
-            st.experimental_rerun()
+            st.rerun()
 
     st.divider()
     st.header("Filter")
@@ -350,14 +350,14 @@ if not df.empty:
         )
         .properties(height=220)
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 else:
     st.info("Add your first record to see stats.")
 
 st.subheader("Library")
 st.dataframe(
     df[["artist", "album", "year", "genre", "rating", "added_at", "notes"]],
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -402,6 +402,6 @@ if filtered:
             ids = [opt.split("(")[-1].rstrip(")") for opt in remove_options]
             removed = _remove_records(library, ids)
             st.success(f"Removed {removed} record(s).")
-            st.experimental_rerun()
+            st.rerun()
 else:
     st.info("No records match your filters.")
