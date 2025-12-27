@@ -71,6 +71,18 @@ def _parse_csv_list(s: str) -> List[str]:
     return out
 
 
+def _parse_bulk_line(line: str) -> Optional[Tuple[str, str]]:
+    if not line:
+        return None
+    parts = re.split(r"\s*[–—-]\s*", line, maxsplit=1)
+    if len(parts) < 2:
+        return None
+    artist, album = [p.strip() for p in parts]
+    if not artist or not album:
+        return None
+    return artist, album
+
+
 def _stars(rating: int) -> str:
     r = max(0, min(5, int(rating)))
     return "★" * r + "☆" * (5 - r)
@@ -261,6 +273,50 @@ with st.sidebar:
         _add_record(library, record)
         st.success("Saved to Vinyl Vault.")
         st.experimental_rerun()
+
+    st.divider()
+    st.header("Bulk add")
+    with st.form("bulk_add"):
+        bulk_text = st.text_area(
+            "Paste one record per line (Artist – Album)",
+            placeholder="Fleetwood Mac – Rumours",
+            height=160,
+        )
+        bulk_rating = st.slider("Default rating", 0, 5, 4, key="bulk_rating")
+        bulk_submitted = st.form_submit_button("Add records")
+
+    if bulk_submitted:
+        lines = [line.strip() for line in bulk_text.splitlines() if line.strip()]
+        added = 0
+        skipped = []
+        for line in lines:
+            parsed = _parse_bulk_line(line)
+            if not parsed:
+                skipped.append(line)
+                continue
+            artist_name, album_name = parsed
+            record = {
+                "id": uuid.uuid4().hex,
+                "artist": artist_name,
+                "album": album_name,
+                "year": None,
+                "genre": "",
+                "rating": bulk_rating,
+                "notes": "",
+                "added_at": _iso_now(),
+            }
+            _add_record(library, record)
+            added += 1
+
+        if added:
+            st.success(f"Added {added} record(s) from bulk upload.")
+        if skipped:
+            st.warning(
+                "Skipped lines without an Artist – Album format:\n"
+                + "\n".join(f"• {line}" for line in skipped)
+            )
+        if added:
+            st.experimental_rerun()
 
     st.divider()
     st.header("Filter")
