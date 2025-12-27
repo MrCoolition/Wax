@@ -275,7 +275,8 @@ col_a, col_b, col_c = st.columns([1, 1, 1])
 with col_a:
     st.metric("Total records", len(records))
 with col_b:
-    avg_rating = int(np.mean([r.get("rating", 0) for r in records]) or 0)
+    ratings = [r.get("rating") for r in records if r.get("rating") is not None]
+    avg_rating = int(np.mean(ratings)) if ratings else 0
     st.metric("Average rating", _stars(avg_rating))
 with col_c:
     latest = records[-1]["added_at"] if records else "—"
