@@ -471,64 +471,6 @@ def _render_virtuoso(library: dict, records: List[dict]) -> None:
                             {"role": "system", "content": _build_wax_wizard_prompt(records)},
                             *st.session_state["virtuoso_messages"],
                         ],
-                        response_format={
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "wax_wizard_actions",
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "assistant_reply": {"type": "string"},
-                                        "actions": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "action": {
-                                                        "type": "string",
-                                                        "enum": ["add", "update", "delete"],
-                                                    },
-                                                    "record": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "artist": {"type": "string"},
-                                                            "album": {"type": "string"},
-                                                            "year": {"type": ["integer", "null"]},
-                                                            "genre": {"type": "string"},
-                                                            "rating": {"type": "integer"},
-                                                            "notes": {"type": "string"},
-                                                        },
-                                                        "required": ["artist", "album"],
-                                                    },
-                                                    "match": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "id": {"type": "string"},
-                                                            "artist": {"type": "string"},
-                                                            "album": {"type": "string"},
-                                                            "year": {"type": ["integer", "null"]},
-                                                        },
-                                                    },
-                                                    "updates": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "artist": {"type": "string"},
-                                                            "album": {"type": "string"},
-                                                            "year": {"type": ["integer", "null"]},
-                                                            "genre": {"type": "string"},
-                                                            "rating": {"type": "integer"},
-                                                            "notes": {"type": "string"},
-                                                        },
-                                                    },
-                                                },
-                                                "required": ["action"],
-                                            },
-                                        },
-                                    },
-                                    "required": ["assistant_reply", "actions"],
-                                },
-                            },
-                        },
                         reasoning={"effort": reasoning_effort},
                     )
                     command_payload = _parse_json_payload(command_response.output_text or "")
