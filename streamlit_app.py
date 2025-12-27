@@ -104,17 +104,23 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _resolve_data_root() -> Path:
-    preferred = APP_DIR / "data"
-    try:
-        preferred.mkdir(parents=True, exist_ok=True)
-        test = preferred / ".write_test"
-        test.write_text("ok", encoding="utf-8")
-        test.unlink(missing_ok=True)
-        return preferred
-    except Exception:
-        fallback = Path(tempfile.gettempdir()) / "vinyl_vault"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+    override = os.environ.get("VINYL_VAULT_DATA_DIR")
+    candidates: List[Path] = []
+    if override:
+        candidates.append(Path(override))
+    candidates.extend([APP_DIR / "data", Path.home() / ".vinyl_vault"])
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            test = candidate / ".write_test"
+            test.write_text("ok", encoding="utf-8")
+            test.unlink(missing_ok=True)
+            return candidate
+        except Exception:
+            continue
+    fallback = Path(tempfile.gettempdir()) / "vinyl_vault"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 DATA_DIR = _resolve_data_root()
