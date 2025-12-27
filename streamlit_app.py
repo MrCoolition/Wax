@@ -298,6 +298,12 @@ def _render_virtuoso(records: List[dict]) -> None:
         help="Defaults to GPT-5.2 for Vinyl Virtuoso.",
         key="virtuoso_model",
     )
+    reasoning_effort = st.selectbox(
+        "Reasoning effort",
+        ["none", "low", "medium", "high", "xhigh"],
+        index=2,
+        help="Higher effort uses more reasoning tokens for deeper answers.",
+    )
 
     if not api_key:
         st.info("Add your OpenAI API key to secrets as `openai_api_key` to enable chat.")
@@ -330,15 +336,15 @@ def _render_virtuoso(records: List[dict]) -> None:
             with st.chat_message("assistant"):
                 with st.spinner("Digging through the vault..."):
                     client = OpenAI(api_key=api_key)
-                    response = client.chat.completions.create(
+                    response = client.responses.create(
                         model=model,
-                        messages=[
+                        input=[
                             {"role": "system", "content": system_prompt},
                             *st.session_state["virtuoso_messages"],
                         ],
-                        temperature=0.3,
+                        reasoning={"effort": reasoning_effort},
                     )
-                    assistant_text = response.choices[0].message.content or ""
+                    assistant_text = response.output_text or ""
                     st.write(assistant_text)
                     st.session_state["virtuoso_messages"].append(
                         {"role": "assistant", "content": assistant_text}
