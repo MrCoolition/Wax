@@ -18,7 +18,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-from auth0_streamlit import AuthError, get_auth0_config, logout_url, require_auth0_login
+from auth0_streamlit import AuthError, get_auth0_config, get_auth0_debug_log, logout_url, require_auth0_login
 from vinyl_repo import VinylRepo, VinylRepoError
 
 
@@ -210,6 +210,10 @@ try:
     claims = require_auth0_login()
 except AuthError as e:
     st.error(str(e))
+    debug_log = get_auth0_debug_log()
+    if debug_log:
+        with st.expander("Auth0 troubleshooting log"):
+            st.json(debug_log, expanded=False)
     st.stop()
 
 auth0_sub = str(claims.get("sub") or "")

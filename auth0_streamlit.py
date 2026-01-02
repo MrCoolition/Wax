@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import hashlib
+import json
 import secrets
 import time
 import tomllib
@@ -29,6 +31,29 @@ class AuthError(RuntimeError):
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _auth0_log(event: str, **context: Any) -> None:
+    logs = st.session_state.setdefault("auth0_debug_log", [])
+    if not isinstance(logs, list):
+        logs = []
+        st.session_state["auth0_debug_log"] = logs
+    safe_context = {}
+    for key, value in context.items():
+        if value is None:
+            safe_context[key] = None
+            continue
+        text = str(value)
+        if "secret" in key or "token" in key:
+            safe_context[key] = f"[redacted:{len(text)}]"
+        else:
+            safe_context[key] = text
+    logs.append({"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "event": event, "context": safe_context})
+
+
+def get_auth0_debug_log() -> list[dict]:
+    logs = st.session_state.get("auth0_debug_log", [])
+    return logs if isinstance(logs, list) else []
 
 
 def _pkce_pair() -> Tuple[str, str]:
@@ -78,6 +103,7 @@ def _token_exchange(cfg: Auth0Config, *, code: str, code_verifier: str) -> Dict[
 
     resp = requests.post(url, json=payload, timeout=20)
     if resp.status_code >= 400:
+        _auth0_log("token_exchange_failed", status=resp.status_code, body=resp.text[:400])
         raise AuthError(f"Token exchange failed: {resp.status_code} {resp.text}")
     return resp.json()
 
@@ -161,6 +187,34 @@ def _get_auth0_secret(key: str) -> str:
     return str(raw or "").strip()
 
 
+def _state_secret(cfg: Auth0Config) -> str:
+    return cfg.client_secret or cfg.client_id
+
+
+def _encode_state(payload: Dict[str, Any], secret: str) -> str:
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    b64 = _b64url(data)
+    sig = hmac.new(secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{b64}.{sig}"
+
+
+def _decode_state(state: str, secret: str) -> Dict[str, Any]:
+    if not state or "." not in state:
+        return {}
+    b64, sig = state.split(".", 1)
+    expected = hmac.new(secret.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        _auth0_log("state_signature_mismatch")
+        return {}
+    try:
+        padding = "=" * (-len(b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(b64 + padding).decode("utf-8"))
+    except Exception:
+        _auth0_log("state_decode_failed")
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def get_auth0_config() -> Auth0Config:
     domain = _get_auth0_secret("auth0_domain")
     client_id = _get_auth0_secret("auth0_client_id")
@@ -181,6 +235,14 @@ def get_auth0_config() -> Auth0Config:
             audience = audience or parsed.get("auth0_audience") or None
 
     if not (domain and client_id and redirect_uri and logout_redirect_uri):
+        _auth0_log(
+            "auth0_secrets_missing",
+            has_domain=bool(domain),
+            has_client_id=bool(client_id),
+            has_redirect_uri=bool(redirect_uri),
+            has_logout_redirect_uri=bool(logout_redirect_uri),
+            has_client_secret=bool(client_secret),
+        )
         raise AuthError(
             "Auth0 secrets missing. Required: auth0_domain, auth0_client_id, "
             "auth0_redirect_uri, auth0_logout_redirect_uri. "
@@ -216,8 +278,19 @@ def _start_login_flow(cfg: Auth0Config, *, message: str = "Log in to access your
     st.session_state["auth0_state"] = login_state
     st.session_state["auth0_nonce"] = nonce
 
-    url = _authorize_url(cfg, state=login_state, nonce=nonce, code_challenge=challenge)
+    state_payload = {
+        "v": verifier,
+        "n": nonce,
+        "r": login_state,
+        "t": int(time.time()),
+    }
+    encoded_state = _encode_state(state_payload, _state_secret(cfg))
 
+    st.session_state["auth0_state"] = encoded_state
+
+    url = _authorize_url(cfg, state=encoded_state, nonce=nonce, code_challenge=challenge)
+
+    _auth0_log("login_flow_started", has_client_secret=bool(cfg.client_secret), redirect_uri=cfg.redirect_uri)
     st.info(message)
     if hasattr(st, "link_button"):
         st.link_button("Log in with Auth0", url, use_container_width=True)
@@ -230,6 +303,7 @@ def require_auth0_login() -> Dict[str, Any]:
     cfg = get_auth0_config()
 
     if "auth0_claims" in st.session_state and st.session_state["auth0_claims"]:
+        _auth0_log("auth0_claims_cached")
         return st.session_state["auth0_claims"]
 
     qp = _get_query_params()
@@ -237,21 +311,31 @@ def require_auth0_login() -> Dict[str, Any]:
     if "error" in qp:
         err = qp.get("error")
         desc = qp.get("error_description", "")
+        _auth0_log("auth0_error", error=err, description=desc)
         raise AuthError(f"Auth0 error: {err} {desc}")
 
     code = qp.get("code")
     state = qp.get("state")
 
     if not code:
+        _auth0_log("auth0_no_code", query_params=list(qp.keys()))
         _start_login_flow(cfg)
 
     expected_state = st.session_state.get("auth0_state")
     if not expected_state:
-        _clear_query_params()
-        st.session_state.pop("auth0_code_verifier", None)
-        st.session_state.pop("auth0_state", None)
-        st.session_state.pop("auth0_nonce", None)
-        _start_login_flow(cfg)
+        _auth0_log("auth0_missing_state", has_code=bool(code), has_state=bool(state))
+        decoded = _decode_state(str(state or ""), _state_secret(cfg))
+        if decoded:
+            st.session_state["auth0_code_verifier"] = decoded.get("v", "")
+            st.session_state["auth0_nonce"] = decoded.get("n", "")
+            st.session_state["auth0_state"] = state
+            expected_state = state
+        else:
+            _clear_query_params()
+            st.session_state.pop("auth0_code_verifier", None)
+            st.session_state.pop("auth0_state", None)
+            st.session_state.pop("auth0_nonce", None)
+            _start_login_flow(cfg)
     if state != expected_state:
         _clear_query_params()
         st.session_state.pop("auth0_code_verifier", None)
@@ -262,9 +346,11 @@ def require_auth0_login() -> Dict[str, Any]:
     verifier = st.session_state.get("auth0_code_verifier", "")
     nonce = st.session_state.get("auth0_nonce", "")
 
+    _auth0_log("auth0_token_exchange_start", has_verifier=bool(verifier))
     tokens = _token_exchange(cfg, code=code, code_verifier=verifier)
     id_token = tokens.get("id_token", "")
     claims = _verify_id_token(cfg, id_token, expected_nonce=nonce)
+    _auth0_log("auth0_token_verified", subject=claims.get("sub", ""))
 
     st.session_state["auth0_tokens"] = tokens
     st.session_state["auth0_claims"] = claims
