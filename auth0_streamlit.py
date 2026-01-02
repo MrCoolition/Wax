@@ -219,17 +219,10 @@ def _start_login_flow(cfg: Auth0Config, *, message: str = "Log in to access your
     url = _authorize_url(cfg, state=login_state, nonce=nonce, code_challenge=challenge)
 
     st.info(message)
-    st.markdown(
-        (
-            f'<a href="{url}" target="_self" style="text-decoration: none;">'
-            '<button style="width: 100%; padding: 0.5rem 0.75rem; '
-            'background-color: #1f77b4; color: white; border: none; '
-            'border-radius: 0.5rem; font-size: 1rem; cursor: pointer;">'
-            "Log in with Auth0"
-            "</button></a>"
-        ),
-        unsafe_allow_html=True,
-    )
+    if hasattr(st, "link_button"):
+        st.link_button("Log in with Auth0", url, use_container_width=True)
+    else:
+        st.markdown(f"[Log in with Auth0]({url})")
     st.stop()
 
 
