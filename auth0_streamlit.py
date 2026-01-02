@@ -4,6 +4,7 @@ import base64
 import hashlib
 import secrets
 import time
+import tomllib
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -139,13 +140,45 @@ def _clear_query_params() -> None:
         st.experimental_set_query_params()
 
 
+def _parse_auth0_blob(blob: str) -> Dict[str, str]:
+    cleaned = (blob or "").strip()
+    if not cleaned:
+        return {}
+    cleaned = cleaned.replace("\\n", "\n")
+    try:
+        parsed = tomllib.loads(cleaned)
+    except tomllib.TOMLDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if v is not None}
+
+
+def _get_auth0_secret(key: str) -> str:
+    raw = st.secrets.get(key, "")
+    if isinstance(raw, str):
+        return raw.strip()
+    return str(raw or "").strip()
+
+
 def get_auth0_config() -> Auth0Config:
-    domain = (st.secrets.get("auth0_domain", "") or "").strip()
-    client_id = (st.secrets.get("auth0_client_id", "") or "").strip()
-    client_secret = (st.secrets.get("auth0_client_secret", "") or "").strip()
-    redirect_uri = (st.secrets.get("auth0_redirect_uri", "") or "").strip()
-    logout_redirect_uri = (st.secrets.get("auth0_logout_redirect_uri", "") or "").strip()
-    audience = (st.secrets.get("auth0_audience", "") or "").strip() or None
+    domain = _get_auth0_secret("auth0_domain")
+    client_id = _get_auth0_secret("auth0_client_id")
+    client_secret = _get_auth0_secret("auth0_client_secret")
+    redirect_uri = _get_auth0_secret("auth0_redirect_uri")
+    logout_redirect_uri = _get_auth0_secret("auth0_logout_redirect_uri")
+    audience = _get_auth0_secret("auth0_audience") or None
+
+    if not (domain and client_id and redirect_uri and logout_redirect_uri):
+        blob = _get_auth0_secret("auth0_secrets") or _get_auth0_secret("auth0_domain")
+        parsed = _parse_auth0_blob(blob)
+        if parsed:
+            domain = domain or parsed.get("auth0_domain", "")
+            client_id = client_id or parsed.get("auth0_client_id", "")
+            client_secret = client_secret or parsed.get("auth0_client_secret", "")
+            redirect_uri = redirect_uri or parsed.get("auth0_redirect_uri", "")
+            logout_redirect_uri = logout_redirect_uri or parsed.get("auth0_logout_redirect_uri", "")
+            audience = audience or parsed.get("auth0_audience") or None
 
     if not (domain and client_id and redirect_uri and logout_redirect_uri):
         raise AuthError(
