@@ -48,7 +48,16 @@ def _iso_now() -> str:
 def _parse_bulk_line(line: str) -> Optional[Tuple[str, str]]:
     if not line:
         return None
-    parts = re.split(r"\s*[–—-]\s*", line, maxsplit=1)
+    cleaned = re.sub(r"^[\s•*-]+\s*", "", line.strip())
+    if not cleaned:
+        return None
+    parts = None
+    for delimiter in (" – ", " — ", " - "):
+        if delimiter in cleaned:
+            parts = cleaned.split(delimiter, 1)
+            break
+    if not parts:
+        parts = re.split(r"\s+[–—-]\s+", cleaned, maxsplit=1)
     if len(parts) < 2:
         return None
     artist, album = [p.strip() for p in parts]
