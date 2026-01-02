@@ -6,6 +6,7 @@ from urllib.parse import quote_plus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import psycopg
+from psycopg import errors
 from psycopg.rows import dict_row
 
 
@@ -61,67 +62,74 @@ class VinylRepo:
         if not email:
             raise VinylRepoError("email required")
 
-        with self._connect(user_id=None) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id
-                    FROM vinyl.app_user
-                    WHERE auth0_sub = %s
-                    LIMIT 1;
-                    """,
-                    (auth0_sub,),
-                )
-                row = cur.fetchone()
-                if row:
-                    user_id = str(row["id"])
+        try:
+            with self._connect(user_id=None) as conn:
+                with conn.cursor() as cur:
                     cur.execute(
                         """
-                        UPDATE vinyl.app_user
-                        SET email = %s,
-                            display_name = COALESCE(%s, display_name)
-                        WHERE id = %s;
+                        SELECT id
+                        FROM vinyl.app_user
+                        WHERE auth0_sub = %s
+                        LIMIT 1;
                         """,
-                        (email, display_name, user_id),
+                        (auth0_sub,),
                     )
-                    conn.commit()
-                    return user_id
+                    row = cur.fetchone()
+                    if row:
+                        user_id = str(row["id"])
+                        cur.execute(
+                            """
+                            UPDATE vinyl.app_user
+                            SET email = %s,
+                                display_name = COALESCE(%s, display_name)
+                            WHERE id = %s;
+                            """,
+                            (email, display_name, user_id),
+                        )
+                        conn.commit()
+                        return user_id
 
-                cur.execute(
-                    """
-                    SELECT id
-                    FROM vinyl.app_user
-                    WHERE email = %s
-                    LIMIT 1;
-                    """,
-                    (email,),
-                )
-                row = cur.fetchone()
-                if row:
-                    user_id = str(row["id"])
                     cur.execute(
                         """
-                        UPDATE vinyl.app_user
-                        SET auth0_sub = %s,
-                            display_name = COALESCE(%s, display_name)
-                        WHERE id = %s;
+                        SELECT id
+                        FROM vinyl.app_user
+                        WHERE email = %s
+                        LIMIT 1;
                         """,
-                        (auth0_sub, display_name, user_id),
+                        (email,),
                     )
+                    row = cur.fetchone()
+                    if row:
+                        user_id = str(row["id"])
+                        cur.execute(
+                            """
+                            UPDATE vinyl.app_user
+                            SET auth0_sub = %s,
+                                display_name = COALESCE(%s, display_name)
+                            WHERE id = %s;
+                            """,
+                            (auth0_sub, display_name, user_id),
+                        )
+                        conn.commit()
+                        return user_id
+
+                    cur.execute(
+                        """
+                        INSERT INTO vinyl.app_user (auth0_sub, email, display_name)
+                        VALUES (%s, %s, %s)
+                        RETURNING id;
+                        """,
+                        (auth0_sub, email, display_name),
+                    )
+                    user_id = str(cur.fetchone()["id"])
                     conn.commit()
                     return user_id
-
-                cur.execute(
-                    """
-                    INSERT INTO vinyl.app_user (auth0_sub, email, display_name)
-                    VALUES (%s, %s, %s)
-                    RETURNING id;
-                    """,
-                    (auth0_sub, email, display_name),
-                )
-                user_id = str(cur.fetchone()["id"])
-                conn.commit()
-                return user_id
+        except errors.InsufficientPrivilege as exc:
+            raise VinylRepoError(
+                "Database user lacks privileges for vinyl.app_user. "
+                "Grant SELECT/INSERT/UPDATE on vinyl.app_user and USAGE on schema vinyl "
+                "to the configured database user."
+            ) from exc
 
     def list_records(
         self,
