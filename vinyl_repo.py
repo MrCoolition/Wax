@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from urllib.parse import quote_plus
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import psycopg
@@ -15,7 +16,20 @@ class VinylRepoError(RuntimeError):
 def _dsn(explicit_dsn: Optional[str] = None) -> str:
     dsn = explicit_dsn or os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL") or ""
     if not dsn:
-        raise VinylRepoError("Missing Postgres DSN (POSTGRES_DSN or DATABASE_URL or explicit_dsn).")
+        host = os.getenv("AIVEN_HOST")
+        port = os.getenv("AIVEN_PORT") or "5432"
+        user = os.getenv("AIVEN_USER")
+        password = os.getenv("AIVEN_PASSWORD")
+        db_name = os.getenv("AIVEN_DB")
+        if host and user and password and db_name:
+            user_enc = quote_plus(user)
+            password_enc = quote_plus(password)
+            dsn = f"postgresql://{user_enc}:{password_enc}@{host}:{port}/{db_name}"
+        else:
+            raise VinylRepoError(
+                "Missing Postgres DSN (POSTGRES_DSN or DATABASE_URL or explicit_dsn) "
+                "or AIVEN_HOST/AIVEN_USER/AIVEN_PASSWORD/AIVEN_DB."
+            )
     return dsn
 
 

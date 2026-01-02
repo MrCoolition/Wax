@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+from urllib.parse import quote_plus
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -105,6 +106,29 @@ def _get_openai_key() -> str:
     if "openai_api_key" in st.secrets:
         return st.secrets["openai_api_key"]
     return os.getenv("OPENAI_API_KEY", "")
+
+
+def _build_repo_dsn(secrets: Dict[str, Any]) -> Optional[str]:
+    explicit = (
+        secrets.get("POSTGRES_DSN")
+        or secrets.get("postgres_dsn")
+        or secrets.get("DATABASE_URL")
+        or secrets.get("database_url")
+    )
+    if explicit:
+        return explicit
+
+    host = secrets.get("AIVEN_HOST")
+    port = secrets.get("AIVEN_PORT") or "5432"
+    user = secrets.get("AIVEN_USER")
+    password = secrets.get("AIVEN_PASSWORD")
+    db_name = secrets.get("AIVEN_DB")
+    if not all([host, user, password, db_name]):
+        return None
+
+    user_enc = quote_plus(str(user))
+    password_enc = quote_plus(str(password))
+    return f"postgresql://{user_enc}:{password_enc}@{host}:{port}/{db_name}"
 
 
 def _build_vault_context(records: List[dict]) -> str:
@@ -226,12 +250,7 @@ if not auth0_sub or not email:
 
 try:
     secrets = st.secrets
-    repo_dsn = (
-        secrets.get("POSTGRES_DSN")
-        or secrets.get("postgres_dsn")
-        or secrets.get("DATABASE_URL")
-        or secrets.get("database_url")
-    )
+    repo_dsn = _build_repo_dsn(secrets)
     REPO = VinylRepo(dsn=repo_dsn)
 except VinylRepoError as e:
     st.error(str(e))
