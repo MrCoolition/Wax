@@ -270,7 +270,7 @@ top_left, top_right = st.columns([3, 1])
 with top_left:
     st.write(f"Logged in as **{display_name}** (`{email}`)")
 with top_right:
-    st.link_button("Logout", logout_url(cfg), use_container_width=True)
+    st.link_button("Logout", logout_url(cfg), width="stretch")
 
 all_records = REPO.list_records(user_id=user_id, limit=10000)
 
@@ -311,36 +311,47 @@ with st.sidebar:
 
     if bulk_submitted:
         lines = [line.strip() for line in bulk_text.splitlines() if line.strip()]
-        items: List[Dict[str, Any]] = []
-        skipped_lines: List[str] = []
-        for line in lines:
-            parsed = _parse_bulk_line(line)
-            if not parsed:
-                skipped_lines.append(line)
-                continue
-            artist_name, album_name = parsed
-            items.append(
-                {
-                    "artist": artist_name,
-                    "album": album_name,
-                    "year": None,
-                    "genre": "",
-                    "rating": bulk_rating,
-                    "notes": "",
-                }
-            )
+        if not lines:
+            st.warning("Add at least one line in the Artist – Album format to bulk add.")
+        else:
+            items: List[Dict[str, Any]] = []
+            skipped_lines: List[str] = []
+            for line in lines:
+                parsed = _parse_bulk_line(line)
+                if not parsed:
+                    skipped_lines.append(line)
+                    continue
+                artist_name, album_name = parsed
+                items.append(
+                    {
+                        "artist": artist_name,
+                        "album": album_name,
+                        "year": None,
+                        "genre": "",
+                        "rating": bulk_rating,
+                        "notes": "",
+                    }
+                )
 
-        added, skipped = REPO.bulk_add(user_id=user_id, items=items, default_rating=bulk_rating)
-        if added:
-            st.success(f"Added {added} record(s) from bulk upload.")
-        if skipped_lines:
-            st.warning(
-                "Skipped lines without an Artist – Album format:\n" + "\n".join(f"• {line}" for line in skipped_lines)
-            )
-        if skipped:
-            st.warning("Some rows failed to insert:\n" + "\n".join(f"• {x}" for x in skipped[:20]))
-        if added:
-            st.rerun()
+            if not items:
+                st.warning("No valid lines found. Use the Artist – Album format per line.")
+            else:
+                try:
+                    added, skipped = REPO.bulk_add(user_id=user_id, items=items, default_rating=bulk_rating)
+                except Exception as exc:
+                    st.error(f"Bulk add failed: {exc}")
+                else:
+                    if added:
+                        st.success(f"Added {added} record(s) from bulk upload.")
+                    if skipped_lines:
+                        st.warning(
+                            "Skipped lines without an Artist – Album format:\n"
+                            + "\n".join(f"• {line}" for line in skipped_lines)
+                        )
+                    if skipped:
+                        st.warning("Some rows failed to insert:\n" + "\n".join(f"• {x}" for x in skipped[:20]))
+                    if added:
+                        st.rerun()
 
     st.divider()
     st.header("Filter")
@@ -379,14 +390,14 @@ if not df.empty:
         )
         .properties(height=220)
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 else:
     st.info("Add your first record to see stats.")
 
 st.subheader("Library")
 st.dataframe(
     df[["artist", "album", "year", "genre", "rating", "added_at", "notes"]] if not df.empty else df,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -454,7 +465,7 @@ if "virtuoso_messages" not in st.session_state:
 
 chat_col, action_col = st.columns([4, 1])
 with action_col:
-    if st.button("Clear chat", use_container_width=True):
+    if st.button("Clear chat", width="stretch"):
         st.session_state["virtuoso_messages"] = []
 
 with chat_col:
