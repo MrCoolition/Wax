@@ -225,7 +225,13 @@ if not auth0_sub or not email:
     st.stop()
 
 try:
-    REPO = VinylRepo(dsn=st.secrets.get("postgres_dsn", None))
+    secrets = st.secrets
+    repo_dsn = (
+        secrets.get("postgres_dsn")
+        or secrets.get("DATABASE_URL")
+        or secrets.get("database_url")
+    )
+    REPO = VinylRepo(dsn=repo_dsn)
 except VinylRepoError as e:
     st.error(str(e))
     st.stop()
