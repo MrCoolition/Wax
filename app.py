@@ -227,6 +227,7 @@ if not auth0_sub or not email:
 try:
     secrets = st.secrets
     repo_dsn = (
+        secrets.get("POSTGRES_DSN")
         secrets.get("postgres_dsn")
         or secrets.get("DATABASE_URL")
         or secrets.get("database_url")
