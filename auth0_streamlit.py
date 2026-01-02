@@ -243,7 +243,13 @@ def require_auth0_login() -> Dict[str, Any]:
         _start_login_flow(cfg)
 
     expected_state = st.session_state.get("auth0_state")
-    if not expected_state or state != expected_state:
+    if not expected_state:
+        _clear_query_params()
+        st.session_state.pop("auth0_code_verifier", None)
+        st.session_state.pop("auth0_state", None)
+        st.session_state.pop("auth0_nonce", None)
+        _start_login_flow(cfg)
+    if state != expected_state:
         _clear_query_params()
         st.session_state.pop("auth0_code_verifier", None)
         st.session_state.pop("auth0_state", None)
