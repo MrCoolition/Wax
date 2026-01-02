@@ -207,6 +207,22 @@ def logout_url(cfg: Auth0Config) -> str:
     return f"{base}?{qs}"
 
 
+def _start_login_flow(cfg: Auth0Config, *, message: str = "Log in to access your Vinyl Vault.") -> None:
+    verifier, challenge = _pkce_pair()
+    login_state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
+
+    st.session_state["auth0_code_verifier"] = verifier
+    st.session_state["auth0_state"] = login_state
+    st.session_state["auth0_nonce"] = nonce
+
+    url = _authorize_url(cfg, state=login_state, nonce=nonce, code_challenge=challenge)
+
+    st.info(message)
+    st.link_button("Log in with Auth0", url, use_container_width=True)
+    st.stop()
+
+
 def require_auth0_login() -> Dict[str, Any]:
     cfg = get_auth0_config()
 
@@ -224,24 +240,15 @@ def require_auth0_login() -> Dict[str, Any]:
     state = qp.get("state")
 
     if not code:
-        verifier, challenge = _pkce_pair()
-        login_state = secrets.token_urlsafe(24)
-        nonce = secrets.token_urlsafe(24)
-
-        st.session_state["auth0_code_verifier"] = verifier
-        st.session_state["auth0_state"] = login_state
-        st.session_state["auth0_nonce"] = nonce
-
-        url = _authorize_url(cfg, state=login_state, nonce=nonce, code_challenge=challenge)
-
-        st.info("Log in to access your Vinyl Vault.")
-        st.link_button("Log in with Auth0", url, use_container_width=True)
-        st.stop()
+        _start_login_flow(cfg)
 
     expected_state = st.session_state.get("auth0_state")
     if not expected_state or state != expected_state:
         _clear_query_params()
-        raise AuthError("State mismatch. Please try logging in again.")
+        st.session_state.pop("auth0_code_verifier", None)
+        st.session_state.pop("auth0_state", None)
+        st.session_state.pop("auth0_nonce", None)
+        _start_login_flow(cfg, message="Your login session expired. Please sign in again.")
 
     verifier = st.session_state.get("auth0_code_verifier", "")
     nonce = st.session_state.get("auth0_nonce", "")
