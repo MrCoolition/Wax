@@ -19,7 +19,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from auth0_streamlit import AuthError, get_auth0_config, logout_url, require_auth0_login
-from vinyl_repo import VinylRepo
+from vinyl_repo import VinylRepo, VinylRepoError
 
 
 APP_DIR = Path(__file__).parent
@@ -220,7 +220,11 @@ if not auth0_sub or not email:
     st.error("Auth0 did not provide required claims (sub/email). Enable email scope/claim in Auth0.")
     st.stop()
 
-REPO = VinylRepo(dsn=st.secrets.get("postgres_dsn", None))
+try:
+    REPO = VinylRepo(dsn=st.secrets.get("postgres_dsn", None))
+except VinylRepoError as e:
+    st.error(str(e))
+    st.stop()
 
 if "user_id" not in st.session_state:
     st.session_state["user_id"] = REPO.ensure_user_from_auth0(
