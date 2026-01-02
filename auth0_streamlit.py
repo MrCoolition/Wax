@@ -154,9 +154,17 @@ def _verify_id_token(cfg: Auth0Config, id_token: str, *, expected_nonce: str) ->
 
 def _get_query_params() -> Dict[str, Any]:
     try:
-        return dict(st.query_params)
+        params: Dict[str, Any] = dict(st.query_params)
     except Exception:
-        return st.experimental_get_query_params()
+        params = st.experimental_get_query_params()
+
+    normalized: Dict[str, Any] = {}
+    for key, value in params.items():
+        if isinstance(value, list):
+            normalized[key] = value[0] if value else ""
+        else:
+            normalized[key] = value
+    return normalized
 
 
 def _clear_query_params() -> None:
