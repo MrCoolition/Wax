@@ -264,34 +264,57 @@ class VinylRepo:
         rating: int,
         notes: str,
     ) -> str:
+        with self._connect(user_id=user_id) as conn:
+            with conn.cursor() as cur:
+                new_id = self._add_record_tx(
+                    cur,
+                    user_id=user_id,
+                    artist=artist,
+                    album=album,
+                    year=year,
+                    genre=genre,
+                    rating=rating,
+                    notes=notes,
+                )
+            conn.commit()
+            return new_id
+
+    def _add_record_tx(
+        self,
+        cur,
+        *,
+        user_id: str,
+        artist: str,
+        album: str,
+        year: Optional[int],
+        genre: Optional[str],
+        rating: int,
+        notes: str,
+    ) -> str:
         artist = (artist or "").strip() or "Unknown Artist"
         album = (album or "").strip() or "Untitled Album"
         genre = (genre or "").strip() or None
         notes = (notes or "").strip()
         rating = int(max(0, min(5, int(rating))))
 
-        with self._connect(user_id=user_id) as conn:
-            with conn.cursor() as cur:
-                artist_id = self._get_or_create_artist_id(cur, name=artist)
-                genre_id = self._get_or_create_genre_id(cur, name=genre)
-                album_id = self._get_or_create_album_id(
-                    cur,
-                    artist_id=artist_id,
-                    title=album,
-                    release_year=year,
-                    genre_id=genre_id,
-                )
-                cur.execute(
-                    """
-                    INSERT INTO vinyl.collection_item (user_id, album_id, rating, notes)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING id;
-                    """,
-                    (user_id, album_id, rating, notes),
-                )
-                new_id = str(cur.fetchone()["id"])
-            conn.commit()
-            return new_id
+        artist_id = self._get_or_create_artist_id(cur, name=artist)
+        genre_id = self._get_or_create_genre_id(cur, name=genre)
+        album_id = self._get_or_create_album_id(
+            cur,
+            artist_id=artist_id,
+            title=album,
+            release_year=year,
+            genre_id=genre_id,
+        )
+        cur.execute(
+            """
+            INSERT INTO vinyl.collection_item (user_id, album_id, rating, notes)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (user_id, album_id, rating, notes),
+        )
+        return str(cur.fetchone()["id"])
 
     def delete_records(self, *, user_id: str, record_ids: Sequence[str]) -> int:
         ids = [x for x in (record_ids or []) if x]
@@ -397,7 +420,8 @@ class VinylRepo:
 
                         if action_type == "add":
                             rec = action.get("record") or {}
-                            new_id = self.add_record(
+                            new_id = self._add_record_tx(
+                                cur,
                                 user_id=user_id,
                                 artist=rec.get("artist") or "Unknown Artist",
                                 album=rec.get("album") or "Untitled Album",
