@@ -6,13 +6,20 @@ import hashlib
 import json
 import secrets
 import time
-import tomllib
+import importlib
+import importlib.util
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 import requests
 import streamlit as st
 from jose import jwt
+
+_TOMLLIB_SPEC = importlib.util.find_spec("tomllib")
+if _TOMLLIB_SPEC is None:
+    tomllib = importlib.import_module("tomli")
+else:
+    tomllib = importlib.import_module("tomllib")
 
 
 @dataclass(frozen=True)
