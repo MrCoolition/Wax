@@ -293,12 +293,16 @@ all_records = REPO.list_records(user_id=user_id, limit=10000)
 with st.sidebar:
     st.header("Add a record")
     with st.form("add_record"):
-        artist = st.text_input("Artist", placeholder="Fleetwood Mac")
-        album = st.text_input("Album", placeholder="Rumours")
-        year = _safe_int(st.text_input("Year", placeholder="1977"), default=0)
-        genre = st.text_input("Genre", placeholder="Rock")
-        rating = st.slider("Rating", 0, 5, 4)
-        notes = st.text_area("Notes", placeholder="Favorite tracks, pressing info, etc.")
+        artist = st.text_input("Artist", placeholder="Fleetwood Mac", key="add_artist")
+        album = st.text_input("Album", placeholder="Rumours", key="add_album")
+        year = _safe_int(st.text_input("Year", placeholder="1977", key="add_year"), default=0)
+        genre = st.text_input("Genre", placeholder="Rock", key="add_genre")
+        rating = st.slider("Rating", 0, 5, 4, key="add_rating")
+        notes = st.text_area(
+            "Notes",
+            placeholder="Favorite tracks, pressing info, etc.",
+            key="add_notes",
+        )
         submitted = st.form_submit_button("Save record")
 
     if submitted:
@@ -322,6 +326,7 @@ with st.sidebar:
             placeholder="Fleetwood Mac – Rumours",
             height=180,
             help="If your list has literal \\n characters, this will split them automatically.",
+            key="list_text",
         )
         list_rating = st.slider("Default rating", 0, 5, 4, key="list_rating")
         list_submitted = st.form_submit_button("Add list")
@@ -368,9 +373,9 @@ with st.sidebar:
 
     st.divider()
     st.header("Filter")
-    query = st.text_input("Search", placeholder="artist, album, notes")
+    query = st.text_input("Search", placeholder="artist, album, notes", key="filter_query")
     genre_options = sorted({r.get("genre") for r in all_records if r.get("genre")})
-    selected_genres = st.multiselect("Genres", genre_options)
+    selected_genres = st.multiselect("Genres", genre_options, key="filter_genres")
 
 filtered = REPO.list_records(user_id=user_id, query=query, genres=selected_genres, limit=10000)
 df = pd.DataFrame.from_records(filtered) if filtered else pd.DataFrame(
@@ -417,7 +422,12 @@ st.dataframe(
 if filtered:
     st.subheader("Record tools")
     record_map = {_record_summary(r): r for r in filtered}
-    selection = st.selectbox("Select a record", list(record_map.keys()))
+    record_options = list(record_map.keys())
+    if record_options:
+        selected_record = st.session_state.get("record_selection")
+        if selected_record not in record_options:
+            st.session_state["record_selection"] = record_options[0]
+    selection = st.selectbox("Select a record", record_options, key="record_selection")
     record = record_map[selection]
 
     tool_cols = st.columns([1, 1, 2])
@@ -452,6 +462,7 @@ if filtered:
         remove_options = st.multiselect(
             "Select records to remove",
             [f"{_record_summary(r)} ({r.get('id')})" for r in filtered],
+            key="remove_records",
         )
         if st.button("Delete selected records", type="primary", disabled=not remove_options):
             ids = [opt.split("(")[-1].rstrip(")") for opt in remove_options]
@@ -468,7 +479,12 @@ st.caption("Ask for picks, vault insights, or tell the wizard what to update.")
 
 api_key = _get_openai_key()
 model = st.text_input("Model", value=DEFAULT_OPENAI_MODEL, key="virtuoso_model")
-reasoning_effort = st.selectbox("Reasoning effort", ["none", "low", "medium", "high", "xhigh"], index=2)
+reasoning_effort = st.selectbox(
+    "Reasoning effort",
+    ["none", "low", "medium", "high", "xhigh"],
+    index=2,
+    key="reasoning_effort",
+)
 
 if not api_key:
     st.info("Add your OpenAI API key to secrets as `openai_api_key` to enable chat.")
@@ -486,7 +502,7 @@ with chat_col:
         with st.chat_message(message["role"]):
             st.write(message["content"])
 
-    prompt = st.chat_input("Tell the Wax Wizard what you need")
+    prompt = st.chat_input("Tell the Wax Wizard what you need", key="virtuoso_prompt")
     if prompt:
         st.session_state["virtuoso_messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
