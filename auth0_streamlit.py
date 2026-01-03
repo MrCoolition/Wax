@@ -308,7 +308,7 @@ def _start_login_flow(cfg: Auth0Config, *, message: str = "Log in to access your
     _auth0_log("login_flow_started", has_client_secret=bool(cfg.client_secret), redirect_uri=cfg.redirect_uri)
     st.info(message)
     if hasattr(st, "link_button"):
-        st.link_button("Log in with Auth0", url, use_container_width=True)
+        st.link_button("Log in with Auth0", url, width="stretch")
     else:
         st.markdown(f"[Log in with Auth0]({url})")
     st.stop()

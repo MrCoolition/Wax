@@ -7,14 +7,16 @@ import os
 import re
 from urllib.parse import quote_plus
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import qrcode
 import streamlit as st
+import openai
 from openai import OpenAI
+from pydantic import BaseModel, Field
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -26,6 +28,55 @@ from vinyl_repo import VinylRepo, VinylRepoError
 APP_DIR = Path(__file__).parent
 ASSETS_DIR = APP_DIR / "assets"
 DEFAULT_OPENAI_MODEL = "gpt-5.2"
+
+
+class AddRecord(BaseModel):
+    artist: str = Field(default="Unknown Artist")
+    album: str = Field(default="Untitled Album")
+    year: Optional[int] = None
+    genre: Optional[str] = None
+    rating: int = Field(default=0, ge=0, le=5)
+    notes: str = Field(default="")
+
+
+class Match(BaseModel):
+    id: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    year: Optional[int] = None
+
+
+class Updates(BaseModel):
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    year: Optional[int] = None
+    genre: Optional[str] = None
+    rating: Optional[int] = Field(default=None, ge=0, le=5)
+    notes: Optional[str] = None
+
+
+class ActionAdd(BaseModel):
+    action: Literal["add"]
+    record: AddRecord
+
+
+class ActionUpdate(BaseModel):
+    action: Literal["update"]
+    match: Match
+    updates: Updates
+
+
+class ActionDelete(BaseModel):
+    action: Literal["delete"]
+    match: Match
+
+
+WaxAction = Annotated[Union[ActionAdd, ActionUpdate, ActionDelete], Field(discriminator="action")]
+
+
+class WaxWizardOutput(BaseModel):
+    assistant_reply: str = Field(default="")
+    actions: List[WaxAction] = Field(default_factory=list)
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -147,7 +198,7 @@ def _build_repo_dsn(secrets: Dict[str, Any]) -> Optional[str]:
     return f"postgresql://{user_enc}:{password_enc}@{host}:{port}/{db_name}"
 
 
-def _build_vault_context(records: List[dict]) -> str:
+def _build_records_context(records: List[dict]) -> str:
     if not records:
         return "[]"
     payload = [
@@ -164,6 +215,20 @@ def _build_vault_context(records: List[dict]) -> str:
         for r in records
     ]
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_vault_summary(records: List[dict]) -> str:
+    total = len(records or [])
+    artists = {r.get("artist") for r in records or [] if r.get("artist")}
+    genres = {r.get("genre") for r in records or [] if r.get("genre")}
+    ratings = [r.get("rating") for r in records or [] if r.get("rating") is not None]
+    avg_rating = int(np.mean(ratings)) if ratings else 0
+    return (
+        f"Total records: {total}\n"
+        f"Unique artists: {len(artists)}\n"
+        f"Unique genres: {len(genres)}\n"
+        f"Average rating: {_stars(avg_rating)}"
+    )
 
 
 def _build_vault_digest(records: List[dict]) -> str:
@@ -183,8 +248,31 @@ def _build_vault_digest(records: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_wax_wizard_prompt(records: List[dict]) -> str:
-    context = _build_vault_context(records)
+def _select_relevant_records(
+    all_records: List[Dict[str, Any]],
+    user_text: str,
+    k: int = 200,
+) -> List[Dict[str, Any]]:
+    text = (user_text or "").lower()
+    tokens = set(re.findall(r"[a-z0-9]+", text))
+    if not tokens:
+        return (all_records or [])[: min(k, len(all_records or []))]
+
+    scored = []
+    for record in (all_records or []):
+        hay = f"{record.get('artist','')} {record.get('album','')} {record.get('genre','')}".lower()
+        score = sum(1 for t in tokens if t in hay)
+        if score:
+            scored.append((score, record))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    if scored:
+        return [record for _, record in scored[:k]]
+
+    return (all_records or [])[: min(k, len(all_records or []))]
+
+
+def _build_wax_wizard_prompt(summary: str, records: List[dict]) -> str:
+    context = _build_records_context(records)
     digest = _build_vault_digest(records)
     return (
         "You are Wax Wizard, the user's Vinyl Virtuoso with full control of the Vinyl Vault. "
@@ -196,9 +284,11 @@ def _build_wax_wizard_prompt(records: List[dict]) -> str:
         "- For add: include artist, album, year (or null), genre, rating (0-5), notes.\n"
         "- For update/delete: include a match object with artist, album, year, or id.\n"
         "- Keep assistant_reply immersive and reassuring.\n"
+        "Vault summary:\n"
+        f"{summary}\n"
         "Vault digest:\n"
         f"{digest}\n"
-        "Vault data (JSON):\n"
+        "Relevant records (JSON):\n"
         f"{context}"
     )
 
@@ -304,7 +394,7 @@ def main() -> None:
     with top_left:
         st.write(f"Logged in as **{display_name}** (`{email}`)")
     with top_right:
-        st.link_button("Logout", logout_url(cfg), use_container_width=True)
+        st.link_button("Logout", logout_url(cfg), width="stretch")
 
     all_records = _db_call(REPO.list_records, user_id=user_id, limit=10000)
 
@@ -502,7 +592,7 @@ def main() -> None:
     reasoning_effort = st.selectbox(
         "Reasoning effort",
         ["none", "low", "medium", "high", "xhigh"],
-        index=2,
+        index=0,
         key="reasoning_effort",
     )
 
@@ -535,20 +625,47 @@ def main() -> None:
 
             with st.chat_message("assistant"):
                 with st.spinner("Digging through the vault..."):
-                    client = OpenAI(api_key=api_key)
-                    command_response = client.responses.create(
-                        model=model,
-                        input=[
-                            {"role": "system", "content": _build_wax_wizard_prompt(all_records)},
-                            *st.session_state["virtuoso_messages"],
-                        ],
-                        reasoning={"effort": reasoning_effort},
+                    client = OpenAI(
+                        api_key=api_key,
+                        max_retries=2,
+                        timeout=60.0,
+                    )
+                    relevant_records = _select_relevant_records(all_records, prompt, k=200)
+                    system_prompt = _build_wax_wizard_prompt(
+                        _build_vault_summary(all_records),
+                        relevant_records,
                     )
 
-                    raw_text = (command_response.output_text or "").strip()
-                    command_payload = _parse_json_payload(raw_text)
-                    assistant_reply = (command_payload.get("assistant_reply") or "").strip()
-                    actions = command_payload.get("actions") or []
+                    try:
+                        command_response = client.responses.parse(
+                            model=model,
+                            input=[
+                                {"role": "system", "content": system_prompt},
+                                *st.session_state["virtuoso_messages"],
+                            ],
+                            reasoning={"effort": reasoning_effort},
+                            text_format=WaxWizardOutput,
+                        )
+                        parsed: WaxWizardOutput = command_response.output_parsed
+                        raw_text = (command_response.output_text or "").strip()
+                        if not raw_text:
+                            raw_text = parsed.model_dump_json()
+                    except openai.APIError as e:
+                        st.error(
+                            "Wax Wizard (LLM) request failed. "
+                            "The app is still running, but the assistant is unavailable."
+                        )
+                        with st.expander("OpenAI error details"):
+                            st.exception(e)
+                        parsed = WaxWizardOutput(
+                            assistant_reply=(
+                                "I couldn’t reach the LLM right now. Please try again in a moment."
+                            )
+                        )
+                        raw_text = ""
+
+                    assistant_reply = (parsed.assistant_reply or "").strip()
+                    actions = [action.model_dump() for action in (parsed.actions or [])]
 
                     if not assistant_reply:
                         assistant_reply = "Tell me what you want changed in the vault, and I’ll do it carefully."
@@ -580,7 +697,7 @@ def main() -> None:
 try:
     main()
 except Exception as exc:
-    st.error("Unexpected error. The app couldn't complete the request.")
+    st.error("Fatal error: the app crashed during render. This is a bug, not user error.")
     with st.expander("Technical details"):
         st.exception(exc)
     st.stop()
