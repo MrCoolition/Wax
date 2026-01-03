@@ -45,7 +45,7 @@ def _iso_now() -> str:
     return _now_naive().replace(microsecond=0).isoformat(sep=" ")
 
 
-def _parse_bulk_line(line: str) -> Optional[Tuple[str, str]]:
+def _parse_list_line(line: str) -> Optional[Tuple[str, str]]:
     if not line:
         return None
     cleaned = re.sub(r"^[\s•*-]+\s*", "", line.strip())
@@ -64,6 +64,13 @@ def _parse_bulk_line(line: str) -> Optional[Tuple[str, str]]:
     if not artist or not album:
         return None
     return artist, album
+
+
+def _normalize_list_input(text: str) -> List[str]:
+    if not text:
+        return []
+    normalized = text.replace("\\n", "\n")
+    return [line.strip() for line in normalized.splitlines() if line.strip()]
 
 
 def _stars(rating: int) -> str:
@@ -308,59 +315,56 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.header("Bulk add")
-    with st.form("bulk_add"):
-        bulk_text = st.text_area(
-            "Paste one record per line (Artist – Album)",
+    st.header("Paste a list")
+    with st.form("list_add"):
+        list_text = st.text_area(
+            "Paste one record per line (Artist – Album).",
             placeholder="Fleetwood Mac – Rumours",
-            height=160,
+            height=180,
+            help="If your list has literal \\n characters, this will split them automatically.",
         )
-        bulk_rating = st.slider("Default rating", 0, 5, 4, key="bulk_rating")
-        bulk_submitted = st.form_submit_button("Add records")
+        list_rating = st.slider("Default rating", 0, 5, 4, key="list_rating")
+        list_submitted = st.form_submit_button("Add list")
 
-    if bulk_submitted:
-        lines = [line.strip() for line in bulk_text.splitlines() if line.strip()]
+    if list_submitted:
+        lines = _normalize_list_input(list_text)
         if not lines:
-            st.warning("Add at least one line in the Artist – Album format to bulk add.")
+            st.warning("Paste at least one line in the Artist – Album format to add a list.")
         else:
-            items: List[Dict[str, Any]] = []
+            added = 0
             skipped_lines: List[str] = []
+            failed_lines: List[str] = []
             for line in lines:
-                parsed = _parse_bulk_line(line)
+                parsed = _parse_list_line(line)
                 if not parsed:
                     skipped_lines.append(line)
                     continue
                 artist_name, album_name = parsed
-                items.append(
-                    {
-                        "artist": artist_name,
-                        "album": album_name,
-                        "year": None,
-                        "genre": "",
-                        "rating": bulk_rating,
-                        "notes": "",
-                    }
-                )
-
-            if not items:
-                st.warning("No valid lines found. Use the Artist – Album format per line.")
-            else:
                 try:
-                    added, skipped = REPO.bulk_add(user_id=user_id, items=items, default_rating=bulk_rating)
+                    REPO.add_record(
+                        user_id=user_id,
+                        artist=artist_name,
+                        album=album_name,
+                        year=None,
+                        genre="",
+                        rating=list_rating,
+                        notes="",
+                    )
+                    added += 1
                 except Exception as exc:
-                    st.error(f"Bulk add failed: {exc}")
-                else:
-                    if added:
-                        st.success(f"Added {added} record(s) from bulk upload.")
-                    if skipped_lines:
-                        st.warning(
-                            "Skipped lines without an Artist – Album format:\n"
-                            + "\n".join(f"• {line}" for line in skipped_lines)
-                        )
-                    if skipped:
-                        st.warning("Some rows failed to insert:\n" + "\n".join(f"• {x}" for x in skipped[:20]))
-                    if added:
-                        st.rerun()
+                    failed_lines.append(f"{line} -> {exc}")
+
+            if added:
+                st.success(f"Added {added} record(s) from your list.")
+            if skipped_lines:
+                st.warning(
+                    "Skipped lines without an Artist – Album format:\n"
+                    + "\n".join(f"• {line}" for line in skipped_lines)
+                )
+            if failed_lines:
+                st.warning("Some rows failed to insert:\n" + "\n".join(f"• {x}" for x in failed_lines[:20]))
+            if added:
+                st.rerun()
 
     st.divider()
     st.header("Filter")

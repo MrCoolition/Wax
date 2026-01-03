@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from urllib.parse import quote_plus
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import psycopg
 from psycopg import errors
@@ -292,57 +292,6 @@ class VinylRepo:
                 new_id = str(cur.fetchone()["id"])
             conn.commit()
             return new_id
-
-    def bulk_add(
-        self,
-        *,
-        user_id: str,
-        items: Sequence[Dict[str, Any]],
-        default_rating: int = 4,
-    ) -> Tuple[int, List[str]]:
-        added = 0
-        skipped: List[str] = []
-        default_rating = int(max(0, min(5, int(default_rating))))
-
-        with self._connect(user_id=user_id) as conn:
-            with conn.cursor() as cur:
-                for it in items:
-                    try:
-                        artist = (it.get("artist") or "").strip()
-                        album = (it.get("album") or "").strip()
-                        if not artist or not album:
-                            skipped.append(f"missing artist/album: {it!r}")
-                            continue
-
-                        year = it.get("year")
-                        year = int(year) if year not in (None, "", 0) else None
-                        genre = (it.get("genre") or "").strip() or None
-                        rating = it.get("rating", default_rating)
-                        rating = int(max(0, min(5, int(rating))))
-                        notes = (it.get("notes") or "").strip()
-
-                        artist_id = self._get_or_create_artist_id(cur, name=artist)
-                        genre_id = self._get_or_create_genre_id(cur, name=genre)
-                        album_id = self._get_or_create_album_id(
-                            cur,
-                            artist_id=artist_id,
-                            title=album,
-                            release_year=year,
-                            genre_id=genre_id,
-                        )
-                        cur.execute(
-                            """
-                            INSERT INTO vinyl.collection_item (user_id, album_id, rating, notes)
-                            VALUES (%s, %s, %s, %s);
-                            """,
-                            (user_id, album_id, rating, notes),
-                        )
-                        added += 1
-                    except Exception as e:
-                        skipped.append(f"{it!r} -> {e}")
-
-            conn.commit()
-        return added, skipped
 
     def delete_records(self, *, user_id: str, record_ids: Sequence[str]) -> int:
         ids = [x for x in (record_ids or []) if x]
