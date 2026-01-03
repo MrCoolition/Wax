@@ -6,9 +6,9 @@ maxUploadSize = 50
 showSidebarNavigation = true
 
 [theme]
-base = "dark"
-primaryColor = "#A78BFA"
-backgroundColor = "#0B0D12"
-secondaryBackgroundColor = "#111522"
-textColor = "#E8EAF0"
+base = "light"
+primaryColor = "#6D28D9"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FB"
+textColor = "#111827"
 font = "sans serif"
