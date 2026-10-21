@@ -23,7 +23,10 @@ try {
     .filter((file) => /^\d+.*\.sql$/.test(file))
     .sort();
   for (const name of files) {
-    const sql = await readFile(resolve(directory, name), "utf8");
+    const sql = (await readFile(resolve(directory, name), "utf8")).replace(
+      /\r\n/g,
+      "\n",
+    );
     const checksum = createHash("sha256").update(sql).digest("hex");
     const prior = (
       await client.query(
