@@ -5,24 +5,35 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 import { authClient } from "./auth-client";
 import { api } from "./library-provider";
-import { Button, ErrorNotice, Field, Vinyl } from "./ui";
-export function AuthView({ join = false }: { join?: boolean }) {
+import { Button, ErrorNotice, Field, SuccessNotice, Vinyl } from "./ui";
+export function AuthView({
+  join = false,
+  recovery = false,
+}: {
+  join?: boolean;
+  recovery?: boolean;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(join);
+  const [loading, setLoading] = useState(join || recovery);
   const [error, setError] = useState("");
   const [accepted, setAccepted] = useState(false);
+  const choosingPassword = (join || recovery) && !accepted;
   useEffect(() => {
-    if (!join) return;
+    if (!join && !recovery) return;
     const invitation =
       new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
     if (!invitation) {
       setError(
-        "This invitation link is missing its private code. Open the complete link from the collection owner.",
+        recovery
+          ? "This recovery link is missing its private code. Open the complete password reset link."
+          : "This invitation link is missing its private code. Open the complete link from the collection owner.",
       );
       setLoading(false);
       return;
@@ -30,7 +41,13 @@ export function AuthView({ join = false }: { join?: boolean }) {
     setToken(invitation);
     let active = true;
     void api<{ email: string }>(
-      "/api/invitations/accept?" + new URLSearchParams({ token: invitation }),
+      recovery
+        ? "/api/recovery/inspect"
+        : "/api/invitations/accept?" +
+            new URLSearchParams({ token: invitation }),
+      recovery
+        ? { method: "POST", body: JSON.stringify({ token: invitation }) }
+        : undefined,
     )
       .then((result) => {
         if (active) setEmail(result.email);
@@ -40,7 +57,7 @@ export function AuthView({ join = false }: { join?: boolean }) {
           setError(
             err instanceof Error
               ? err.message
-              : "This invitation could not be opened.",
+              : "This private link could not be opened. Please try again.",
           );
       })
       .finally(() => {
@@ -49,12 +66,28 @@ export function AuthView({ join = false }: { join?: boolean }) {
     return () => {
       active = false;
     };
-  }, [join]);
+  }, [join, recovery]);
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
+    if (recovery && !accepted && password !== confirmation) {
+      setError("The passwords do not match. Enter the same password twice.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
+      if (recovery && !accepted) {
+        await api("/api/recovery", {
+          method: "POST",
+          body: JSON.stringify({ token, password }),
+        });
+        setAccepted(true);
+        setConfirmation("");
+        setShowPassword(false);
+        window.history.replaceState(null, "", "/recover");
+        return;
+      }
       if (join && !accepted) {
         await api("/api/invitations/accept", {
           method: "POST",
@@ -115,24 +148,48 @@ export function AuthView({ join = false }: { join?: boolean }) {
             </Link>
           </div>
           <span className="eyebrow">
-            {join
-              ? "YOUR NAME’S ON THE LIST."
-              : "WELCOME BACK TO THE GOOD STUFF."}
+            {recovery
+              ? "BACK TO THE GOOD STUFF."
+              : join
+                ? "YOUR NAME’S ON THE LIST."
+                : "WELCOME BACK TO THE GOOD STUFF."}
           </span>
-          <h2>{join ? "Come on in." : "Your records await."}</h2>
+          <h2>
+            {recovery
+              ? accepted
+                ? "You’re back in tune."
+                : "A fresh start."
+              : join
+                ? "Come on in."
+                : "Your records await."}
+          </h2>
           <p>
-            {join
-              ? "Make yourself at home. Your own private collection starts right here."
-              : "The finds. The favorites. The ones you’ll never let go. All in one good place."}
+            {recovery
+              ? "Choose a new password for your existing account. Your records stay right where you left them."
+              : join
+                ? "Make yourself at home. Your own private collection starts right here."
+                : "The finds. The favorites. The ones you’ll never let go. All in one good place."}
           </p>
           {loading ? (
-            <p role="status">Checking your invitation…</p>
+            <p role="status">
+              {recovery
+                ? "Checking your recovery link…"
+                : "Checking your invitation…"}
+            </p>
           ) : (
-            <form onSubmit={submit}>
+            <form method="post" autoComplete="on" onSubmit={submit}>
+              {recovery && accepted && (
+                <SuccessNotice>
+                  Your password is updated. Save it in your password manager,
+                  then sign in below.
+                </SuccessNotice>
+              )}
               {join && (
                 <Field label="Full name">
                   <input
                     required
+                    id="wax-name"
+                    name="name"
                     autoComplete="name"
                     maxLength={150}
                     value={name}
@@ -144,40 +201,81 @@ export function AuthView({ join = false }: { join?: boolean }) {
               <Field label="Email address">
                 <input
                   type="email"
+                  id="wax-email"
+                  name="username"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
                   value={email}
-                  readOnly={join}
+                  readOnly={join || recovery}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                 />
               </Field>
               <Field
-                label="Password"
+                label={recovery && !accepted ? "New password" : "Password"}
                 hint={
-                  join
-                    ? "At least 12 characters. Make it a good one."
+                  choosingPassword
+                    ? "At least 12 characters. Save this password in your browser or password manager."
                     : undefined
                 }
               >
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
+                  id="wax-password"
+                  name="password"
                   required
-                  minLength={join ? 12 : 1}
+                  minLength={choosingPassword ? 12 : 1}
                   maxLength={128}
-                  autoComplete={join ? "new-password" : "current-password"}
+                  autoComplete={
+                    choosingPassword ? "new-password" : "current-password"
+                  }
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={join ? "Choose a password" : "Your password"}
+                  placeholder={
+                    choosingPassword ? "Choose a password" : "Your password"
+                  }
                 />
               </Field>
+              {recovery && !accepted && (
+                <Field label="Confirm new password">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="wax-password-confirmation"
+                    name="password-confirmation"
+                    required
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={confirmation}
+                    onChange={(e) => setConfirmation(e.target.value)}
+                    placeholder="Enter it once more"
+                  />
+                </Field>
+              )}
+              <button
+                className="text-button"
+                type="button"
+                aria-controls={
+                  recovery && !accepted
+                    ? "wax-password wax-password-confirmation"
+                    : "wax-password"
+                }
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? "Hide password" : "Show password"}
+              </button>
               <ErrorNotice>{error}</ErrorNotice>
               <Button
                 type="submit"
                 busy={busy}
-                disabled={join && (!email || !token)}
+                disabled={(join || recovery) && !accepted && (!email || !token)}
               >
-                {join ? "Open my collection" : "Sign in"}{" "}
+                {recovery && !accepted
+                  ? "Update my password"
+                  : join && !accepted
+                    ? "Open my collection"
+                    : "Sign in"}{" "}
                 <ArrowRight size={16} />
               </Button>
             </form>
@@ -192,11 +290,13 @@ export function AuthView({ join = false }: { join?: boolean }) {
                 marginRight: 6,
               }}
             />
-            {join
-              ? "Your collection is private. Share only the crates you choose."
-              : "WAX is an invited circle of collectors. Ask the owner for an invitation to start your collection."}
+            {recovery
+              ? "This private recovery link works once. Updating your password signs out your other sessions."
+              : join
+                ? "Your collection is private. Share only the crates you choose."
+                : "WAX is an invited circle of collectors. Ask the owner for an invitation to start your collection."}
           </p>
-          {join && (
+          {(join || recovery) && (
             <Link className="text-button" href="/sign-in">
               Already have a collection? Sign in <ArrowRight size={13} />
             </Link>

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import { databaseUrl } from "../src/server/database-url";
 import { seedOwnerInvitation } from "../src/server/bootstrap";
+import { seedOwnerRecovery } from "../src/server/recovery";
 
 const connectionString = databaseUrl();
 const pool = new Pool({ connectionString, max: 1 });
@@ -51,6 +52,13 @@ try {
   if (ownerEmail && bootstrap) {
     await seedOwnerInvitation(client, ownerEmail, bootstrap);
     console.log("Owner invitation checked.");
+  }
+  const recovery = process.env.WAX_OWNER_RECOVERY_TOKEN;
+  if (ownerEmail && recovery) {
+    console.log(
+      "Owner recovery checked.",
+      await seedOwnerRecovery(client, ownerEmail, recovery),
+    );
   }
   await client.query("COMMIT");
   console.log("WAX migrations complete.");
