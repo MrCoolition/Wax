@@ -28,17 +28,18 @@ npm run dev
 
 Open `http://localhost:3000`. Do not point local development or preview deployments at the production database.
 
-| Variable                | Purpose                                                                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          | Postgres URL for the current environment. Only production supports existing `neon_connect` as a fallback. Preview and development require their own URL. |
-| `BETTER_AUTH_SECRET`    | Independent random secret of at least 32 characters per environment.                                                                                     |
-| `BETTER_AUTH_URL`       | Canonical application origin. Use `http://localhost:3000` locally; preview can fall back to `VERCEL_URL`.                                                |
-| `OPENAI_API_KEY`        | OpenAI API key. Existing `chaz_gpt` is supported as a fallback.                                                                                          |
-| `WAX_AI_MODEL`          | Optional OpenAI model override; defaults to `gpt-5.4-mini`.                                                                                              |
-| `BLOB_READ_WRITE_TOKEN` | Token for a private Blob store. A linked `BLOB_STORE_ID` with Vercel OIDC is also supported.                                                             |
-| `DISCOGS_TOKEN`         | Optional Discogs personal-access token for authenticated lookup.                                                                                         |
-| `WAX_OWNER_EMAIL`       | Email address bound to the initial owner invitation.                                                                                                     |
-| `WAX_BOOTSTRAP_TOKEN`   | Random initial owner invitation token of at least 32 characters.                                                                                         |
+| Variable                   | Purpose                                                                                                                                                  |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`             | Postgres URL for the current environment. Only production supports existing `neon_connect` as a fallback. Preview and development require their own URL. |
+| `BETTER_AUTH_SECRET`       | Independent random secret of at least 32 characters per environment.                                                                                     |
+| `BETTER_AUTH_URL`          | Canonical application origin. Use `http://localhost:3000` locally; preview can fall back to `VERCEL_URL`.                                                |
+| `OPENAI_API_KEY`           | OpenAI API key. Existing `chaz_gpt` is supported as a fallback.                                                                                          |
+| `WAX_AI_MODEL`             | Optional OpenAI model override; defaults to `gpt-5.4-mini`.                                                                                              |
+| `BLOB_READ_WRITE_TOKEN`    | Token for a private Blob store. A linked `BLOB_STORE_ID` with Vercel OIDC is also supported.                                                             |
+| `DISCOGS_TOKEN`            | Optional Discogs personal-access token for authenticated lookup.                                                                                         |
+| `WAX_OWNER_EMAIL`          | Email address bound to the initial owner invitation.                                                                                                     |
+| `WAX_BOOTSTRAP_TOKEN`      | Random initial owner invitation token of at least 32 characters.                                                                                         |
+| `WAX_OWNER_RECOVERY_TOKEN` | Optional random one-use recovery token for the existing owner; at least 32 characters.                                                                   |
 
 Canonical environment names take precedence over their aliases. Runtime and migration checks require both the role and database to be `wax_preview` for `VERCEL_ENV=preview`, or `wax_development` for local/development processes. `VERCEL_ENV=production` selects production configuration. A missing or mismatched nonproduction URL fails before connection. Keep all values server-side and out of Git. `db:verify` checks database connectivity and reports whether AI and Blob configuration exists without printing credentials; it does not validate every provider's credentials.
 
@@ -51,6 +52,12 @@ If the unused owner invitation expires, rotate `WAX_BOOTSTRAP_TOKEN` to a new ra
 Open `<app-origin>/join#token=<WAX_BOOTSTRAP_TOKEN>` privately, register using the configured email and a password of at least 12 characters, then sign in. The token is a URL fragment and only its hash is stored in Postgres. Treat the full link as a credential. After successful setup, remove the bootstrap token from deployment configuration.
 
 The owner creates and revokes collector invitations in the application. Share those links with the intended recipients yourself; WAX does not send invitation emails. Public registration is disabled. Existing collectors receive their own private library.
+
+## Owner password recovery
+
+An invitation is consumed when the account is created. If the browser does not save the password, issuing another invitation cannot recover that account. An authorized operator can set a fresh cryptographically random `WAX_OWNER_RECOVERY_TOKEN` in the production environment, keep `WAX_OWNER_EMAIL` equal to the established owner's email, and run migrations through a production deployment. This creates a recovery link only for that existing owner, without changing any collection data.
+
+Give the owner `<app-origin>/recover#token=<WAX_OWNER_RECOVERY_TOKEN>` privately, then remove the recovery token from Vercel configuration. The link expires after 24 hours and works once; only its SHA-256 digest is stored in Postgres. Reusing an old token cannot extend or reactivate it. A fresh token revokes older unused recovery links. Changing the password invalidates the account's existing sessions. The owner chooses and confirms their password on the recovery page and should save it in their browser or password manager; WAX cannot guarantee browser password saving.
 
 ## Migrations and deployment
 
@@ -82,6 +89,6 @@ Tests use fixtures and PGlite for SQL behavior, including ownership, duplicate h
 
 The first release targets collections under 1,000 records. Wizard context includes at most 1,000 copies and 500 characters of notes per copy; an edit proposal covers at most 20 copies. Uploads accept JPEG, PNG, and WebP up to 3 MiB; HEIC requires conversion. Camera scanning needs HTTPS or localhost and browser permission. Barcode and artwork matches may represent several pressings.
 
-Invitations currently provide access without an email-delivery service: email verification and self-service password recovery are not implemented. AI, Discogs, and Blob outages require retrying or manual entry. Uploaded photos are retained independently of copy deletion; a photo-retention/deletion interface is not yet available. Live provider access and physical iOS/Android camera behavior require deployment checks in addition to automated tests.
+Invitations currently provide access without an email-delivery service. Email verification and self-service password recovery are not implemented; owner recovery requires an operator-issued link as described above. AI, Discogs, and Blob outages require retrying or manual entry. Uploaded photos are retained independently of copy deletion; a photo-retention/deletion interface is not yet available. Live provider access and physical iOS/Android camera behavior require deployment checks in addition to automated tests.
 
 Listening-room tools, shop planning, commerce, public signup, marketplace valuation, and streaming playback are outside this release.
