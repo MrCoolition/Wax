@@ -106,7 +106,7 @@ function BarcodeCamera({
       stopped = true;
       controls?.stop();
       const stream = currentVideo?.srcObject;
-      if (stream instanceof MediaStream)
+      if (typeof MediaStream !== "undefined" && stream instanceof MediaStream)
         stream.getTracks().forEach((track) => track.stop());
     };
   }, []);

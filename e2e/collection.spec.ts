@@ -123,6 +123,9 @@ test("camera denial and upload or AI failures preserve a recoverable photo draft
   page,
 }) => {
   await page.addInitScript(() => {
+    if (!navigator.mediaDevices) {
+      Object.defineProperty(navigator, "mediaDevices", { value: {} });
+    }
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       value: () =>
         Promise.reject(new DOMException("Test denial", "NotAllowedError")),
