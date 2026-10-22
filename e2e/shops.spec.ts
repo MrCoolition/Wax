@@ -168,6 +168,19 @@ test("location is opt-in, rounded in a POST, and produces ordered shop direction
   expect(destination.searchParams.has("origin")).toBe(false);
   await expect(directions).toHaveAttribute("rel", "noopener noreferrer");
   await expect(
+    page.locator(".shop-card").getByRole("link", { name: "Directions" }),
+  ).toHaveCount(3);
+  await expect(
+    page.locator(".shop-card").first().getByRole("link", { name: "Website" }),
+  ).toHaveAttribute("href", "https://example.com/record-shop");
+  await expect(
+    page.locator('.shop-card a[href*="openstreetmap.org"]'),
+  ).toHaveCount(0);
+  await expect(page.getByText("OSM listing", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "OpenStreetMap contributors" }),
+  ).toHaveAttribute("href", "https://www.openstreetmap.org/copyright");
+  await expect(
     page.getByText("Address details unavailable.", { exact: false }),
   ).toBeVisible();
   await expectNoOverflow(page);
@@ -312,7 +325,7 @@ test("a late location callback cannot overwrite a newer manual area", async ({
     .click();
   await expect(
     page.getByRole("heading", {
-      name: "No mapped record shops in this area yet.",
+      name: "No matching record shops in this area yet.",
     }),
   ).toBeVisible();
   await page.evaluate(() => {

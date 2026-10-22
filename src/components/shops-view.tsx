@@ -102,15 +102,6 @@ function ShopCard({ shop, index }: { shop: RecordShop; index: number }) {
             Website <ExternalLink size={13} />
           </a>
         )}
-        <a
-          className="shop-source"
-          href={shop.osmUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`View ${shop.name} on OpenStreetMap`}
-        >
-          OSM listing <ArrowUpRight size={12} />
-        </a>
       </div>
     </li>
   );
@@ -485,8 +476,10 @@ export function ShopsView() {
                 ))}
               </ol>
               <p className="shops-results-note">
-                Distances are approximate and measured in a straight line, not
-                by road. Check listed hours with the shop before heading out.
+                Listings need evidence of vinyl or record sales. Unconfirmed
+                music stores are left out. Distances are approximate and
+                measured in a straight line, not by road. Check listed hours
+                with the shop before heading out.
                 {result.limited &&
                   " Results are limited; try a smaller radius for a more focused search."}
               </p>
@@ -494,10 +487,11 @@ export function ShopsView() {
           ) : (
             <div className="shops-empty">
               <Compass size={42} strokeWidth={1.3} />
-              <h3>No mapped record shops in this area yet.</h3>
+              <h3>No matching record shops in this area yet.</h3>
               <p>
-                Community listings aren’t exhaustive. Try a wider radius, search
-                another area, or keep digging on Google Maps.
+                Listings need evidence of vinyl or record sales. Community data
+                isn’t exhaustive. Try a wider radius, search another area, or
+                keep digging on Google Maps.
               </p>
               <a
                 className="button button-secondary"
