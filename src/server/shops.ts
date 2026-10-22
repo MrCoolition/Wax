@@ -10,6 +10,7 @@ import {
 } from "@/lib/shops";
 import { getPool } from "./db";
 import { HttpError } from "./http";
+import { hasVinylSalesEvidence } from "./shop-vinyl";
 
 export const placesSchema = z
   .object({
@@ -144,15 +145,15 @@ function retryAfter(response: Response): number {
   return Math.min(300, Math.max(1, Number.isFinite(seconds) ? seconds : 30));
 }
 
-async function providerJson(url: URL): Promise<unknown> {
-  await reserveProvider();
+async function providerJson(url: URL, details = false): Promise<unknown> {
+  if (!details) await reserveProvider();
   try {
     const response = await fetch(url, {
       headers: {
         "User-Agent": "WAX/1.0 (+https://wax-coolition.vercel.app)",
         Accept: "application/json",
       },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(details ? 8000 : 12_000),
       cache: "no-store",
       redirect: "error",
     });
@@ -171,7 +172,7 @@ async function providerJson(url: URL): Promise<unknown> {
       );
     }
     if (!response.ok) throw unavailable();
-    return await readJson(response, 500_000);
+    return await readJson(response, details ? 1_000_000 : 500_000);
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw unavailable();
@@ -315,11 +316,31 @@ function safePhone(value: unknown): string | null {
   return phone && /^[+\d][\d\s()+./;#-]{4,79}$/.test(phone) ? phone : null;
 }
 
-export function normalizeShops(
-  value: unknown,
-  center: ShopArea,
-  radiusKm: number,
-): { shops: RecordShop[]; limited: boolean } {
+type OsmType = "node" | "way" | "relation";
+export type OsmShopDetails = Record<
+  string,
+  {
+    tags: JsonObject;
+    visible: boolean;
+    point?: ShopArea;
+  }
+>;
+
+function osmIdentity(
+  tags: JsonObject,
+): { type: OsmType; id: number; key: string } | null {
+  const type = ({ N: "node", W: "way", R: "relation" } as const)[
+    String(tags.osm_type) as "N" | "W" | "R"
+  ];
+  return type &&
+    typeof tags.osm_id === "number" &&
+    Number.isSafeInteger(tags.osm_id) &&
+    tags.osm_id > 0
+    ? { type, id: tags.osm_id, key: `${type}/${tags.osm_id}` }
+    : null;
+}
+
+function photonFeatures(value: unknown): unknown[] {
   const raw = object(value);
   if (
     raw.type !== "FeatureCollection" ||
@@ -328,49 +349,122 @@ export function normalizeShops(
     !Array.isArray(raw.features)
   )
     throw unavailable();
+  return raw.features;
+}
+
+async function currentShopDetails(value: unknown): Promise<OsmShopDetails> {
+  const grouped: Record<OsmType, Set<number>> = {
+    node: new Set(),
+    way: new Set(),
+    relation: new Set(),
+  };
+  for (const feature of photonFeatures(value).slice(0, 100)) {
+    const identity = osmIdentity(object(object(feature).properties));
+    if (identity) grouped[identity.type].add(identity.id);
+  }
+  const details: OsmShopDetails = {};
+  // At most one bounded request per element type. Only public tags and node
+  // coordinates are retained; contributor information is discarded.
+  for (const type of ["node", "way", "relation"] as const) {
+    const ids = [...grouped[type]].sort((a, b) => a - b);
+    if (!ids.length) continue;
+    const url = new URL(`https://api.openstreetmap.org/api/0.6/${type}s.json`);
+    url.searchParams.set(`${type}s`, ids.join(","));
+    const batch = await cached<OsmShopDetails>(
+      `osm-details:v1:${hash(url.href)}`,
+      7 * 24 * 3600,
+      async () => {
+        const raw = object(await providerJson(url, true));
+        if (
+          !Array.isArray(raw.elements) ||
+          raw.elements.length > 100 ||
+          raw.error !== undefined
+        )
+          throw unavailable();
+        const found: OsmShopDetails = {};
+        for (const entry of raw.elements) {
+          const element = object(entry);
+          if (
+            element.type !== type ||
+            typeof element.id !== "number" ||
+            !grouped[type].has(element.id)
+          )
+            throw unavailable();
+          if (
+            element.visible !== undefined &&
+            typeof element.visible !== "boolean"
+          )
+            throw unavailable();
+          if (
+            element.tags !== undefined &&
+            (!element.tags ||
+              typeof element.tags !== "object" ||
+              Array.isArray(element.tags))
+          )
+            throw unavailable();
+          const tags = object(element.tags);
+          if (Object.values(tags).some((tag) => typeof tag !== "string"))
+            throw unavailable();
+          const point =
+            type === "node" ? coordinates(element.lat, element.lon) : null;
+          if (type === "node" && element.visible !== false && !point)
+            throw unavailable();
+          found[`${type}/${element.id}`] = {
+            tags,
+            visible: element.visible !== false,
+            ...(point ? { point } : {}),
+          };
+        }
+        return found;
+      },
+    );
+    Object.assign(details, batch);
+  }
+  return details;
+}
+
+export function normalizeShops(
+  value: unknown,
+  center: ShopArea,
+  radiusKm: number,
+  details?: OsmShopDetails,
+): { shops: RecordShop[]; limited: boolean } {
+  const features = photonFeatures(value);
   const shops: RecordShop[] = [];
   let usableFeatures = 0;
-  for (const element of raw.features.slice(0, 100)) {
+  for (const element of features.slice(0, 100)) {
     const item = object(element);
-    const tags = object(item.properties);
+    const properties = object(item.properties);
     const geometry = object(item.geometry);
     const pointValues = Array.isArray(geometry.coordinates)
       ? geometry.coordinates
       : [];
-    const point =
+    const photonPoint =
       geometry.type === "Point"
         ? coordinates(pointValues[1], pointValues[0])
         : null;
-    if (item.type !== "Feature" || !point || !Object.keys(tags).length)
+    if (
+      item.type !== "Feature" ||
+      !photonPoint ||
+      !Object.keys(properties).length
+    )
       continue;
     usableFeatures++;
-    const osmType = (
-      { N: "node", W: "way", R: "relation" } as Record<string, string>
-    )[String(tags.osm_type)];
-    if (
-      tags.osm_key !== "shop" ||
-      tags.osm_value !== "music" ||
-      !osmType ||
-      typeof tags.osm_id !== "number" ||
-      !Number.isSafeInteger(tags.osm_id) ||
-      tags.osm_id <= 0
-    )
-      continue;
-    if (
-      Object.keys(tags).some(
-        (key) =>
-          /^(disused|abandoned|demolished|removed|razed|closed)(:|$)/.test(
-            key,
-          ) &&
-          tags[key] !== "no" &&
-          tags[key] !== "false",
-      ) ||
-      tags.access === "no" ||
-      tags.opening_hours === "closed"
-    )
-      continue;
+    const identity = osmIdentity(properties);
+    if (!identity || properties.osm_key !== "shop") continue;
+    const current = details?.[identity.key];
+    if (details && (!current || !current.visible)) continue;
+    // Current OSM tags are authoritative. Only Photon address components may
+    // fill gaps, never its old category/name/product/closure metadata.
+    const tags: JsonObject = current
+      ? { ...current.tags }
+      : { ...properties, shop: properties.osm_value };
+    for (const key of ["housenumber", "street", "city", "state", "postcode"])
+      tags[key] = tags[`addr:${key}`] || properties[key];
+    const point = current?.point || photonPoint;
     const name = text(tags.name) || text(tags["name:en"]);
-    if (!name) continue;
+    if (!name || !hasVinylSalesEvidence(identity.key, name, point, tags))
+      continue;
     const distance = distanceKm(center, point);
     if (distance > radiusKm) continue;
     const address = [
@@ -382,7 +476,7 @@ export function normalizeShops(
       .filter(Boolean)
       .join(", ");
     const shop: RecordShop = {
-      id: `${osmType}/${tags.osm_id}`,
+      id: identity.key,
       name,
       ...point,
       distanceKm: Math.round(distance * 100) / 100,
@@ -391,7 +485,7 @@ export function normalizeShops(
         safeWebsite(tags.website) || safeWebsite(tags["contact:website"]),
       phone: safePhone(tags.phone) || safePhone(tags["contact:phone"]),
       openingHours: text(tags.opening_hours, 500) || null,
-      osmUrl: `https://www.openstreetmap.org/${osmType}/${tags.osm_id}`,
+      osmUrl: `https://www.openstreetmap.org/${identity.key}`,
     };
     const duplicate = shops.find(
       (existing) =>
@@ -406,14 +500,14 @@ export function normalizeShops(
       duplicate.openingHours ||= shop.openingHours;
     } else shops.push(shop);
   }
-  if (raw.features.length && !usableFeatures) throw unavailable();
+  if (features.length && !usableFeatures) throw unavailable();
   shops.sort(
     (a, b) => a.distanceKm - b.distanceKm || a.name.localeCompare(b.name),
   );
   // Public Photon instances may clamp a larger requested limit to 50.
   return {
     shops: shops.slice(0, 50),
-    limited: shops.length > 50 || raw.features.length >= 50,
+    limited: shops.length > 50 || features.length >= 50,
   };
 }
 
@@ -427,15 +521,13 @@ export async function findNearbyShops(
   url.searchParams.set("lon", String(center.longitude));
   url.searchParams.set("radius", String(parsed.radiusKm));
   url.searchParams.set("limit", "100");
-  url.searchParams.set("include", "osm.shop.music");
+  url.searchParams.set("include", "osm.shop.music,osm.shop.musical_instrument");
   url.searchParams.set("lang", "en");
-  const key = `nearby:${hash(`${url.href}:${center.latitude}:${center.longitude}:${parsed.radiusKm}`)}`;
+  const key = `nearby:vinyl-v2:${hash(`${url.href}:${center.latitude}:${center.longitude}:${parsed.radiusKm}`)}`;
   return cached(key, 6 * 3600, async () => {
-    const result = normalizeShops(
-      await providerJson(url),
-      center,
-      parsed.radiusKm,
-    );
+    const candidates = await providerJson(url);
+    const details = await currentShopDetails(candidates);
+    const result = normalizeShops(candidates, center, parsed.radiusKm, details);
     return {
       center,
       radiusKm: parsed.radiusKm,

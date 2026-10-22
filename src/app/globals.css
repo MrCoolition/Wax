@@ -4172,16 +4172,6 @@ button:focus-visible {
 .shop-card-actions .shop-text-link {
   font-size: 11px;
 }
-.shop-source {
-  font-size: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--muted);
-}
-.shop-source:hover {
-  text-decoration: underline;
-}
 .shops-results-note {
   font-size: 11px;
   color: var(--muted);
@@ -4373,9 +4363,6 @@ button:focus-visible {
   }
   .shop-card-actions .shop-text-link {
     font-size: 12px;
-  }
-  .shop-source {
-    margin-left: auto;
   }
   .shops-start {
     gap: 13px;

@@ -119,6 +119,32 @@ try {
   assert.equal(repeated.result.fetchedAt, nearby.result.fetchedAt);
   assert.deepEqual(repeated.result.shops, nearby.result.shops);
   console.log("PASS: repeated searches reuse the shared provider cache.");
+
+  const columbus = await request("/api/shops/nearby", {
+    latitude: 40.02,
+    longitude: -83.04,
+    radiusKm: 25,
+  });
+  assert.equal(columbus.response.status, 200, JSON.stringify(columbus.result));
+  const names = columbus.result.shops.map((shop) => shop.name);
+  for (const name of [
+    "Lost Weekend Records",
+    "Elizabeth Records",
+    "RPM",
+    "Used Kids Records",
+    "Magnolia Thunderpussy",
+  ])
+    assert.ok(names.includes(name), `Known record seller retained: ${name}`);
+  for (const name of [
+    "Columbus Percussion",
+    "Sam Ash Music",
+    "Stanton's Sheet Music",
+    "German Village Music Haus",
+  ])
+    assert.ok(!names.includes(name), `Unconfirmed vinyl seller excluded: ${name}`);
+  console.log(
+    `PASS: ${names.length} Columbus record shops; known vinyl sellers retained and broad music-store false positives excluded.`,
+  );
 } finally {
   await pool.query("DELETE FROM wax.invitations WHERE token_hash=$1", [digest]);
   await pool.query("DELETE FROM wax.users WHERE email=$1", [email]);
