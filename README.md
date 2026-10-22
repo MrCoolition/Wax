@@ -2,7 +2,7 @@
 
 Serious collection tools. Record-shop soul.
 
-WAX is a private vinyl library for invited collectors: artwork and table browsing, physical copies, crates, shelf locations, search/barcode/photo capture, listening history, CSV export, printable record QR labels, selective crate sharing, and the Wax Wizard. Real collections start empty; fixtures belong to tests.
+WAX is a private vinyl library for invited collectors: artwork and table browsing, physical copies, crates, shelf locations, search/barcode/photo capture, listening history, CSV export, printable record QR labels, selective crate sharing, nearby record shops, and the Wax Wizard. Real collections start empty; fixtures belong to tests.
 
 The app uses Next.js App Router, React, TypeScript, Tailwind/Radix, Node.js 24, Neon Postgres, Drizzle, and Vercel. The former Streamlit application remains recoverable in Git history.
 
@@ -58,6 +58,16 @@ The owner creates and revokes collector invitations in the application. Share th
 An invitation is consumed when the account is created. If the browser does not save the password, issuing another invitation cannot recover that account. An authorized operator can set a fresh cryptographically random `WAX_OWNER_RECOVERY_TOKEN` in the production environment, keep `WAX_OWNER_EMAIL` equal to the established owner's email, and run migrations through a production deployment. This creates a recovery link only for that existing owner, without changing any collection data.
 
 Give the owner `<app-origin>/recover#token=<WAX_OWNER_RECOVERY_TOKEN>` privately, then remove the recovery token from Vercel configuration. The link expires after 24 hours and works once; only its SHA-256 digest is stored in Postgres. Reusing an old token cannot extend or reactivate it. A fresh token revokes older unused recovery links. Changing the password invalidates the account's existing sessions. The owner chooses and confirms their password on the recovery page and should save it in their browser or password manager; WAX cannot guarantee browser password saving.
+
+## Nearby record shops
+
+Open **Record shops** at `/shops`, then choose **Use my current location** or search for a city or postal code. Location is requested only after clicking the button. Manual searches return area choices, including country/state information for ambiguous names and postal codes. Searches cover 10, 25, or 50 kilometres and show mapped recorded-music shops, approximate straight-line distances, address details, source listings, and Google Maps directions. Instrument-only stores are excluded by category; community data can still be incomplete or outdated, and vinyl stock is not guaranteed.
+
+The browser rounds device coordinates to two decimal places before sending them in an authenticated POST body. The server applies the same rounding and sends only the approximate area to Photon; user identity, browser IP, and precise device coordinates are not forwarded. WAX stores shared, expiring place/shop results without an owner ID or location history. Place results are cached for seven days and shop results for six hours. Expired entries are removed on subsequent searches. Per-collector limits, a shared provider throttle, bounded response sizes, and timeouts protect the service. Provider errors preserve the selected area and offer retry or an external Maps search.
+
+[Photon](https://github.com/komoot/photon#demo-server) supplies OpenStreetMap data without an API key for reasonable project usage. The page attributes [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). `PHOTON_API_URL` and `PHOTON_REVERSE_API_URL` can select alternative HTTPS Photon-compatible endpoints; the defaults are `https://photon.komoot.io/api/` and `https://photon.komoot.io/reverse`. As usage grows, move to a dedicated provider or self-hosted Photon instance. No public map tiles, paid Places API, or AI inference is required.
+
+`node --env-file-if-exists=.env.local scripts/smoke-shops.mjs` verifies the live application API, Neon cache, and provider results against a local app backed by the isolated development database. For a protected preview, set `WAX_TEST_URL` to its exact generated URL, use the matching `wax_preview` database credentials, and supply the linked project's short-lived development `VERCEL_OIDC_TOKEN`. It creates and cleans up its own temporary invited collector; it cannot run against the production database.
 
 ## Migrations and deployment
 

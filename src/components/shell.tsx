@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
   Plus,
   RefreshCw,
+  MapPin,
 } from "lucide-react";
 import { useLibrary } from "./library-provider";
 import { Button, ErrorNotice } from "./ui";
@@ -32,6 +33,12 @@ const navigation = [
     short: "Listening",
   },
   { href: "/wizard", label: "Wax Wizard", icon: Sparkles, short: "Wizard" },
+  {
+    href: "/shops",
+    label: "Record shops nearby",
+    icon: MapPin,
+    short: "Shops",
+  },
 ];
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
