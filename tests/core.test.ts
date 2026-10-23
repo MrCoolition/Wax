@@ -77,6 +77,7 @@ import {
   deleteCopy,
   getCopy,
   getLibrary,
+  logListen,
   shareCrate,
   unshareCrate,
   updateCopy,
@@ -291,7 +292,7 @@ describe("collection isolation and real SQL behavior", () => {
     });
     expect((await getCopy("bob", b.id)).title).toBe("Rejuvenation");
   });
-  it("expires provider artwork while keeping reviewed collection text through catalog refresh", async () => {
+  it("keeps lazy artwork resolvers after cache expiry without persisting provider artwork", async () => {
     const candidate = {
       ...EMPTY_CANDIDATE,
       discogsId: 123,
@@ -309,11 +310,13 @@ describe("collection isolation and real SQL behavior", () => {
       ],
     );
     const copy = await createCopy("alice", record({ candidate }));
-    expect(copy.coverUrl).toBe("https://i.discogs.com/current.jpg");
+    expect(copy.coverUrl).toBe("/api/catalog/123/artwork");
     await state.db.exec(
       "UPDATE wax.catalog_cache SET fetched_at=now()-interval '7 hours'",
     );
-    expect((await getCopy("alice", copy.id)).coverUrl).toBeNull();
+    expect((await getCopy("alice", copy.id)).coverUrl).toBe(
+      "/api/catalog/123/artwork",
+    );
     await state.db.query(
       "UPDATE wax.catalog_cache SET payload=$1,fetched_at=now()",
       [
@@ -326,7 +329,7 @@ describe("collection isolation and real SQL behavior", () => {
     );
     const refreshed = await getCopy("alice", copy.id);
     expect(refreshed.title).toBe("My reviewed title");
-    expect(refreshed.coverUrl).toBe("https://i.discogs.com/refreshed.jpg");
+    expect(refreshed.coverUrl).toBe("/api/catalog/123/artwork");
     expect(
       (
         await state.db.query<{ metadata: { coverUrl: null } }>(
@@ -343,6 +346,43 @@ describe("collection isolation and real SQL behavior", () => {
         )
       ).rows[0].metadata,
     ).toEqual({});
+    // Editing the returned candidate must accept its same-origin image URL.
+    const edited = await updateCopy("alice", copy.id, {
+      version: refreshed.version,
+      candidate: { ...candidate, coverUrl: refreshed.coverUrl },
+    });
+    expect(edited.coverUrl).toBe("/api/catalog/123/artwork");
+  });
+  it("uses the same lazy cover in listening history and explicitly shared crates", async () => {
+    const copy = await createCopy(
+      "alice",
+      record({
+        candidate: {
+          ...EMPTY_CANDIDATE,
+          discogsId: 123,
+          artist: "The Meters",
+          title: "Rejuvenation",
+        },
+      }),
+    );
+    await logListen("alice", { recordId: copy.id, notes: "Private listen" });
+    const crate = await createCrate("alice", {
+      name: "Funk",
+      description: "",
+      color: "#d85a2a",
+    });
+    await updateCopy("alice", copy.id, { version: 1, crateIds: [crate.id] });
+    expect((await getLibrary("bob")).sharedCrates).toEqual([]);
+    await shareCrate("alice", crate.id, "bob@example.com");
+    const shared = (await getLibrary("bob")).sharedCrates[0].records[0];
+    expect(shared.coverUrl).toBe("/api/catalog/123/artwork");
+    expect(shared).not.toHaveProperty("notes");
+    expect((await getLibrary("alice")).listens[0].coverUrl).toBe(
+      "/api/catalog/123/artwork",
+    );
+    expect((await getLibrary("bob")).listens).toEqual([]);
+    await unshareCrate("alice", crate.id, "bob");
+    expect((await getLibrary("bob")).sharedCrates).toEqual([]);
   });
   it("applies approved edits atomically and rejects stale or foreign edits", async () => {
     const first = await createCopy("alice", record());

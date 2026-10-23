@@ -1,5 +1,10 @@
 "use client";
-import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+} from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, Disc3, LoaderCircle, ArrowUpRight } from "lucide-react";
 import type { CatalogCandidate } from "@/lib/contracts";
@@ -120,13 +125,40 @@ export function Cover({
   className?: string;
 }) {
   const [failedSource, setFailedSource] = useState<string | null>(null);
-  return record.coverUrl && failedSource !== record.coverUrl ? (
+  const [retry, setRetry] = useState({ source: "", attempt: 0 });
+  const source = record.coverUrl;
+  const attempt = retry.source === source ? retry.attempt : 0;
+  const imageKey = `${source}:${attempt}`;
+  useEffect(() => {
+    if (!source || failedSource !== imageKey) return;
+    const recover = () => {
+      setRetry({ source, attempt: attempt + 1 });
+      setFailedSource(null);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recover();
+    };
+    // One automatic retry; subsequent retries wait for a reconnect or return.
+    // Covers also live inside links and labels, so no nested retry controls.
+    const timer = attempt === 0 ? window.setTimeout(recover, 2000) : undefined;
+    window.addEventListener("online", recover);
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("online", recover);
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [source, failedSource, imageKey, attempt]);
+  return source && failedSource !== imageKey ? (
     <img
+      key={imageKey}
       className={"cover " + className}
-      src={record.coverUrl}
+      src={source}
       alt={record.artist + " — " + record.title + " sleeve"}
       loading="lazy"
-      onError={() => setFailedSource(record.coverUrl)}
+      onError={() => setFailedSource(imageKey)}
     />
   ) : (
     <div className={"cover-fallback " + className}>

@@ -71,6 +71,12 @@ The narrow checked-sales entries in `src/server/shop-vinyl.ts` retain their sour
 
 `node --env-file-if-exists=.env.local scripts/smoke-shops.mjs` verifies the live application API, Neon cache, and provider results against a local app backed by the isolated development database. For a protected preview, set `WAX_TEST_URL` to its exact generated URL, use the matching `wax_preview` database credentials, and supply the linked project's short-lived development `VERCEL_OIDC_TOKEN`. It creates and cleans up its own temporary invited collector; it cannot run against the production database.
 
+### Your shop ratings and people
+
+Each collector has a private shop notebook: save a 1–5 star rating, add employee names and roles, and choose from six illustrated avatars. Ratings can be cleared and people edited or removed. Saved shops remain available without repeating a nearby search. Changes are saved explicitly; failed requests retain the draft, and version checks prevent another tab from silently overwriting a newer edit. Removing a saved shop removes only that collector's rating and people.
+
+`/api/shops/notebook` stores this information in `wax.shop_notebook`, scoped to the authenticated collector on every read and write. Shop ratings and employees are not public reviews, shared crate content, discovery-cache data, or Wizard context. Avatars are rendered locally without sending names to an image service. `scripts/smoke-shop-notebook.mjs` verifies persistence, updates, deletion, duplicate/stale-save protection, and isolation between two temporary collectors using the same development/preview safeguards as the shop-search smoke test.
+
 ## Migrations and deployment
 
 Checked-in SQL lives in `migrations/`. `npm run db:migrate` takes a transaction-scoped Postgres advisory lock, applies pending migrations together in one transaction, and records their checksums in `wax.schema_migrations`. This lock works with Neon's pooled connections. Add a new migration to change an existing database; do not edit an applied migration.
@@ -83,7 +89,7 @@ GitHub Actions runs installation, type checks, tests, and a production build wit
 
 - Every collection operation checks the authenticated collector. Sharing grants read-only access to a selected crate; purchase prices, private notes, original uploads, exports, and Wizard context remain private. Owners can revoke a grant.
 - Releases and owned copies are separate. Intentional duplicates remain separate copies; save idempotency prevents accidental duplicates from repeated requests. Updates use versions to detect conflicting edits.
-- Provider lookup payloads live in the expiring catalog cache. Release rows retain identity; per-copy fields retain the collector's reviewed text and corrections. Artwork URLs are not retained as copy fields, and catalog refresh never replaces saved text. These are implemented data-retention boundaries, not a general assertion of compliance with every provider term.
+- Provider lookup payloads live in the expiring catalog cache. Release rows retain identity; per-copy fields retain the collector's reviewed text and corrections. Artwork URLs are not retained as copy fields, and catalog refresh never replaces saved text. Saved covers use an authenticated, stable `/api/catalog/{id}/artwork` resolver that renews expired provider metadata when the image is requested, including in shared crates and listening history. Transient image failures retry once, then recover on reconnect or return to the page. The notebook smoke test also verifies overnight cache expiry against a live Discogs cover. These are implemented data-retention boundaries, not a general assertion of compliance with every provider term.
 - Photo recognition reads clues and looks up catalog candidates. Artwork never confirms a pressing automatically. Search failures and ambiguous matches support manual review.
 - The Wizard receives the current collector's library context and, for recognition, the selected uploaded photo. These requests go to OpenAI with response storage disabled. Discogs receives catalog search terms. Neither provider receives database credentials.
 - Wizard proposals do not change copies until approved. Approval rechecks ownership and versions and applies the whole proposal in a transaction; repeated approval does not apply it twice.

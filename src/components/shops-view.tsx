@@ -25,6 +25,14 @@ import {
 } from "@/lib/shops";
 import { api } from "./library-provider";
 import { Button, ErrorNotice } from "./ui";
+import type { SavedShop, ShopSnapshot } from "@/lib/shop-notebook";
+import {
+  SavedShops,
+  ShopNotebookEditor,
+  ShopPeople,
+  ShopRating,
+  useShopNotebook,
+} from "./shop-notebook";
 
 type SelectedArea = ShopArea & { label: string };
 type Result = NearbyShops & { label: string };
@@ -45,7 +53,19 @@ function mapsSearch(area: ShopArea | null, label?: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
-function ShopCard({ shop, index }: { shop: RecordShop; index: number }) {
+function ShopCard({
+  shop,
+  index,
+  saved,
+  notebookReady,
+  onEdit,
+}: {
+  shop: RecordShop;
+  index: number;
+  saved?: SavedShop;
+  notebookReady: boolean;
+  onEdit: (shop: ShopSnapshot, saved: SavedShop | null) => void;
+}) {
   const miles = shop.distanceKm * 0.621371;
   const distance =
     miles < 0.1 ? "Under 0.1 mi" : `About ${miles.toFixed(1)} mi`;
@@ -83,6 +103,12 @@ function ShopCard({ shop, index }: { shop: RecordShop; index: number }) {
         )}
         {shop.phone && <p className="shop-phone">Phone: {shop.phone}</p>}
       </div>
+      {saved && (
+        <div className="shop-card-personal">
+          <ShopRating rating={saved.rating} />
+          <ShopPeople employees={saved.employees} />
+        </div>
+      )}
       <div className="shop-card-actions">
         <a
           className="button button-primary"
@@ -103,11 +129,37 @@ function ShopCard({ shop, index }: { shop: RecordShop; index: number }) {
           </a>
         )}
       </div>
+      <Button
+        className="shop-notebook-trigger"
+        variant="quiet"
+        disabled={!notebookReady}
+        onClick={() =>
+          onEdit(
+            {
+              id: shop.id,
+              name: shop.name,
+              latitude: shop.latitude,
+              longitude: shop.longitude,
+              address: shop.address,
+              website: shop.website,
+            },
+            saved ?? null,
+          )
+        }
+      >
+        {saved ? "Your shop notes" : "Rate & add people"}
+        <ArrowUpRight size={14} />
+      </Button>
     </li>
   );
 }
 
 export function ShopsView() {
+  const notebook = useShopNotebook();
+  const [editingShop, setEditingShop] = useState<{
+    shop: ShopSnapshot;
+    saved: SavedShop | null;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const [radius, setRadius] = useState<ShopRadiusKm>(10);
   const [places, setPlaces] = useState<ShopPlace[]>([]);
@@ -255,6 +307,12 @@ export function ShopsView() {
 
   const shops =
     result?.shops.slice().sort((a, b) => a.distanceKm - b.distanceKm) || [];
+  const savedById = new Map(
+    notebook.shops.map((entry) => [entry.shop.id, entry]),
+  );
+  function editShop(shop: ShopSnapshot, saved: SavedShop | null) {
+    if (notebook.status === "ready") setEditingShop({ shop, saved });
+  }
   return (
     <div className="shops-view">
       <header className="shops-hero">
@@ -422,6 +480,8 @@ export function ShopsView() {
         )}
       </section>
 
+      <SavedShops notebook={notebook} onEdit={editShop} />
+
       <div className="shops-status" role="status" aria-live="polite">
         {busy === "places" ? (
           <>
@@ -472,7 +532,14 @@ export function ShopsView() {
             <>
               <ol className="shops-grid">
                 {shops.map((shop, index) => (
-                  <ShopCard key={shop.id} shop={shop} index={index} />
+                  <ShopCard
+                    key={shop.id}
+                    shop={shop}
+                    index={index}
+                    saved={savedById.get(shop.id)}
+                    notebookReady={notebook.status === "ready"}
+                    onEdit={editShop}
+                  />
                 ))}
               </ol>
               <p className="shops-results-note">
@@ -564,6 +631,14 @@ export function ShopsView() {
           trip.
         </p>
       </footer>
+      {editingShop && (
+        <ShopNotebookEditor
+          shop={editingShop.shop}
+          saved={editingShop.saved}
+          notebook={notebook}
+          onClose={() => setEditingShop(null)}
+        />
+      )}
     </div>
   );
 }
