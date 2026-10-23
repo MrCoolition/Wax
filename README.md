@@ -77,6 +77,16 @@ Each collector has a private shop notebook: save a 1–5 star rating, add employ
 
 `/api/shops/notebook` stores this information in `wax.shop_notebook`, scoped to the authenticated collector on every read and write. Shop ratings and employees are not public reviews, shared crate content, discovery-cache data, or Wizard context. Avatars are rendered locally without sending names to an image service. `scripts/smoke-shop-notebook.mjs` verifies persistence, updates, deletion, duplicate/stale-save protection, and isolation between two temporary collectors using the same development/preview safeguards as the shop-search smoke test.
 
+## Song credits and the Artist Tree
+
+Open a record and choose **Artist Tree** to pick a song, see its credited players, instruments, production, writing, and arrangements, then follow people into bands and other records. Credits without specific tracks remain separate from confirmed song credits; ambiguous track references are shown without guessing. Discogs may not list every contributor. Main artist billing alone never establishes an instrument credit.
+
+The explorer follows one branch at a time, keeps a back trail, and pages through discographies. Master entries open their designated main release rather than treating master IDs as release IDs. Exact matches to the collector's own release IDs get an **In your collection** link. A record without a catalog link uses an explicit search-and-select step for exploration; this never updates the copy or confirms its pressing.
+
+Four authenticated read-only routes serve the owned-record entry, public release credits, artist connections, and paginated discographies. Private copy ownership is checked before loading the entry. Only normalized public Discogs metadata enters the six-hour provider cache; collection badges remain private client state. Fixed provider paths, bounded responses, and rate limits protect the integration. No AI inference, new credentials, or schema migration is involved. `node --env-file-if-exists=.env.local scripts/smoke-explorer.mjs` verifies the live album → song → artist → related-release flow and two-collector isolation in development or a protected preview; it refuses production and cleans up its temporary collectors.
+
+WAX's browser tab uses a vector record monogram with 16/32/48px ICO fallbacks. The phone shortcut uses a matching 180px record-label icon. Editable SVG sources live in `src/app/icon.svg` and `src/assets/wax-app-icon.svg`.
+
 ## Migrations and deployment
 
 Checked-in SQL lives in `migrations/`. `npm run db:migrate` takes a transaction-scoped Postgres advisory lock, applies pending migrations together in one transaction, and records their checksums in `wax.schema_migrations`. This lock works with Neon's pooled connections. Add a new migration to change an existing database; do not edit an applied migration.
