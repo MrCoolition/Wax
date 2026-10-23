@@ -11,7 +11,10 @@ export interface CatalogCandidate {
   discogsId: number | null;
   artist: string;
   title: string;
+  /** The year of this particular pressing/release, retained for identification. */
   year: number | null;
+  /** Original album release year; unknown is never replaced with the pressing year. */
+  originalYear?: number | null;
   genres: string[];
   label: string;
   catalogNumber: string;
@@ -80,6 +83,8 @@ export interface LibraryData {
   crates: Crate[];
   sharedCrates: SharedCrate[];
   listens: ListeningEntry[];
+  /** Owner-only legacy metadata needing a bounded, authenticated enrichment. */
+  needsOriginalYears?: boolean;
 }
 export interface CreateRecordInput {
   idempotencyKey: string;
@@ -148,6 +153,7 @@ export const EMPTY_CANDIDATE: CatalogCandidate = {
   artist: "",
   title: "",
   year: null,
+  originalYear: null,
   genres: [],
   label: "",
   catalogNumber: "",

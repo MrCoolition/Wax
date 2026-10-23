@@ -66,6 +66,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const router = useRouter();
   const sequence = useRef(0);
+  const yearEnrichmentAttempted = useRef(false);
   const refresh = useCallback(async () => {
     const current = ++sequence.current;
     try {
@@ -92,6 +93,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    if (!data?.needsOriginalYears || yearEnrichmentAttempted.current) return;
+    yearEnrichmentAttempted.current = true;
+    // Upgrade legacy copies in a bounded, authenticated write. Do not block
+    // browsing or repeat a failing provider request on every library refresh.
+    // A later page load can retry an outage or continue a larger old library.
+    void api<{ updated: number }>("/api/records/years", {
+      method: "POST",
+      body: JSON.stringify({}),
+    })
+      .then((result) => {
+        if (result.updated > 0) return refresh();
+      })
+      .catch(() => {
+        // The collection remains usable; unknown years are never pressing years.
+      });
+  }, [data?.needsOriginalYears, refresh]);
   return (
     <LibraryContext.Provider
       value={{ data, loading, error, refresh, search, setSearch }}

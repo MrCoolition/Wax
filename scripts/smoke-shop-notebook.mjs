@@ -122,9 +122,69 @@ try {
     alice,
   );
   assert.equal(copy.response.status, 200);
+  assert.equal(copy.result.originalYear, 1959);
+  assert.equal(copy.result.year, 2010);
+  // Simulate a pre-upgrade copy in this disposable collector only.
+  await pool.query(
+    "UPDATE wax.copies SET metadata=metadata-'originalYear' WHERE id=$1",
+    [copy.result.id],
+  );
+  const beforeYear = (
+    await pool.query(
+      "SELECT to_jsonb(c)-'version'-'updated_at' AS snapshot FROM wax.copies c WHERE id=$1",
+      [copy.result.id],
+    )
+  ).rows[0].snapshot;
+  assert.equal(
+    (await request("/api/library", "GET", undefined, alice)).result
+      .needsOriginalYears,
+    true,
+  );
+  assert.equal(
+    (await request("/api/records/years", "POST", {})).response.status,
+    401,
+  );
+  const filledYears = await request("/api/records/years", "POST", {}, alice);
+  assert.equal(
+    filledYears.response.status,
+    200,
+    JSON.stringify(filledYears.result),
+  );
+  assert.deepEqual(filledYears.result, {
+    updated: 1,
+    processed: 1,
+    remaining: 0,
+    transientFailure: false,
+  });
+  const afterYear = (
+    await pool.query(
+      "SELECT to_jsonb(c)-'version'-'updated_at' AS snapshot FROM wax.copies c WHERE id=$1",
+      [copy.result.id],
+    )
+  ).rows[0].snapshot;
+  assert.deepEqual(afterYear, {
+    ...beforeYear,
+    metadata: { ...beforeYear.metadata, originalYear: 1959 },
+  });
+  const correctedLibrary = await request(
+    "/api/library",
+    "GET",
+    undefined,
+    alice,
+  );
+  assert.equal(correctedLibrary.result.needsOriginalYears, false);
+  assert.equal(correctedLibrary.result.records[0].originalYear, 1959);
+  assert.equal(correctedLibrary.result.records[0].year, 2010);
+  assert.equal(
+    (await request("/api/records/years", "POST", {}, bob)).result.updated,
+    0,
+  );
+  console.log(
+    "PASS: legacy album year resolves through the live release/master API; pressing year and all existing copy data stay intact.",
+  );
   await pool.query(
     "UPDATE wax.catalog_cache SET fetched_at=now()-interval '7 hours' WHERE cache_key=$1",
-    [`release:${releaseId}`],
+    [`release:v2:${releaseId}`],
   );
   const library = await request("/api/library", "GET", undefined, alice);
   assert.equal(library.result.records[0].coverUrl, artworkPath);
@@ -158,7 +218,7 @@ try {
     (
       await pool.query(
         "SELECT fetched_at>now()-interval '5 minutes' AS fresh FROM wax.catalog_cache WHERE cache_key=$1",
-        [`release:${releaseId}`],
+        [`release:v2:${releaseId}`],
       )
     ).rows[0].fresh,
   );
@@ -167,7 +227,7 @@ try {
   );
   const input = {
     shop: {
-      id: "node/12919585334",
+      id: "directory/wax-notebook-test-fixture",
       name: "WAX shop notebook test fixture",
       latitude: 40.02,
       longitude: -83.01,

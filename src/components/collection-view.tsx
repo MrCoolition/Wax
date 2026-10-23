@@ -27,6 +27,19 @@ import {
 } from "./ui";
 import { CONDITIONS, type RecordCopy } from "@/lib/contracts";
 
+function compareAlbumYear(a: RecordCopy, b: RecordCopy, newestFirst: boolean) {
+  if (a.originalYear == null)
+    return b.originalYear == null ? a.title.localeCompare(b.title) : 1;
+  if (b.originalYear == null) return -1;
+  return (
+    (newestFirst
+      ? b.originalYear - a.originalYear
+      : a.originalYear - b.originalYear) ||
+    a.artist.localeCompare(b.artist) ||
+    a.title.localeCompare(b.title)
+  );
+}
+
 export function RecordCard({ record }: { record: RecordCopy }) {
   return (
     <article className="record-card">
@@ -52,7 +65,7 @@ export function RecordCard({ record }: { record: RecordCopy }) {
         </Link>
         <div className="record-facts">
           <span>
-            {record.year || "Year unknown"}
+            {record.originalYear ?? "Year unknown"}
             {record.genres[0] ? " · " + record.genres[0] : ""}
           </span>
           <span>
@@ -123,9 +136,13 @@ export function CollectionView() {
               ? a.title.localeCompare(b.title)
               : sort === "rating"
                 ? b.rating - a.rating
-                : sort === "unplayed"
-                  ? a.spinCount - b.spinCount
-                  : b.addedAt.localeCompare(a.addedAt),
+                : sort === "year-oldest"
+                  ? compareAlbumYear(a, b, false)
+                  : sort === "year-newest"
+                    ? compareAlbumYear(a, b, true)
+                    : sort === "unplayed"
+                      ? a.spinCount - b.spinCount
+                      : b.addedAt.localeCompare(a.addedAt),
         ),
     [records, search, genre, condition, location, sort],
   );
@@ -295,6 +312,8 @@ export function CollectionView() {
                   <option value="newest">Recently added</option>
                   <option value="artist">Artist A–Z</option>
                   <option value="title">Title A–Z</option>
+                  <option value="year-oldest">Album year · oldest first</option>
+                  <option value="year-newest">Album year · newest first</option>
                   <option value="rating">Highest rated</option>
                   <option value="unplayed">Least played</option>
                 </select>
@@ -372,7 +391,7 @@ export function CollectionView() {
                 <thead>
                   <tr>
                     <th>RECORD</th>
-                    <th>YEAR / GENRE</th>
+                    <th>ALBUM YEAR / GENRE</th>
                     <th>CONDITION</th>
                     <th>LOCATION</th>
                     <th>ADDED</th>
@@ -394,7 +413,7 @@ export function CollectionView() {
                         </Link>
                       </td>
                       <td>
-                        {record.year || "—"}
+                        {record.originalYear ?? "Year unknown"}
                         <small>{record.genres.join(", ") || "—"}</small>
                       </td>
                       <td>

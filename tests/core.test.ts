@@ -61,6 +61,7 @@ vi.mock("../src/server/catalog", async (original) => ({
     artist: "The Meters",
     title: "Rejuvenation",
     year: 1974,
+    originalYear: 1974,
     label: "Reprise",
     catalogNumber: "MS 2200",
     country: "US",
@@ -291,6 +292,58 @@ describe("collection isolation and real SQL behavior", () => {
       candidate: { ...candidate, title: "My transcription" },
     });
     expect((await getCopy("bob", b.id)).title).toBe("Rejuvenation");
+  });
+  it("persists original and pressing years separately and keeps reviewed edits private to the copy", async () => {
+    const candidate = {
+      ...EMPTY_CANDIDATE,
+      discogsId: 123,
+      artist: "The Meters",
+      title: "Rejuvenation",
+      year: 2022,
+    };
+    const copy = await createCopy("alice", record({ candidate }));
+    expect(copy).toMatchObject({ year: 2022, originalYear: 1974 });
+    const other = await createCopy("bob", record({ candidate }));
+    const edited = await updateCopy("alice", copy.id, {
+      version: copy.version,
+      candidate: { ...candidate, originalYear: 1973 },
+    });
+    expect(edited).toMatchObject({ year: 2022, originalYear: 1973 });
+    expect(await getCopy("bob", other.id)).toMatchObject({
+      year: 2022,
+      originalYear: 1974,
+    });
+    const manual = await createCopy(
+      "alice",
+      record({
+        candidate: {
+          ...EMPTY_CANDIDATE,
+          artist: "The Beach Boys",
+          title: "Pet Sounds",
+          year: 2024,
+          originalYear: 1966,
+        },
+      }),
+    );
+    expect(manual).toMatchObject({ year: 2024, originalYear: 1966 });
+    const crate = await createCrate("alice", { name: "Original years" });
+    await updateCrate("alice", crate.id, { recordIds: [manual.id] });
+    await shareCrate("alice", crate.id, "bob@example.com");
+    expect((await getLibrary("bob")).sharedCrates[0].records[0]).toMatchObject({
+      year: 2024,
+      originalYear: 1966,
+    });
+    await expect(
+      updateCopy("alice", manual.id, {
+        version: manual.version,
+        candidate: {
+          ...EMPTY_CANDIDATE,
+          artist: "Artist",
+          title: "Title",
+          originalYear: 2500,
+        },
+      }),
+    ).rejects.toThrow();
   });
   it("keeps lazy artwork resolvers after cache expiry without persisting provider artwork", async () => {
     const candidate = {

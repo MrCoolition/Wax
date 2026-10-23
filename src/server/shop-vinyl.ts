@@ -78,9 +78,11 @@ export function hasVinylSalesEvidence(
       Math.abs(seller.longitude - point.longitude) < 0.001,
   );
   const shops = tokens(tags.shop);
+  // Product tags also describe record sections inside book, second-hand, and
+  // other mixed retailers. A shop category alone never proves vinyl sales.
+  if (explicit && shops.some(Boolean)) return true;
   if (!shops.some((shop) => ["music", "musical_instrument"].includes(shop)))
     return false;
-  if (explicit) return true;
   if (
     music.length > 0 &&
     music.every((kind) =>

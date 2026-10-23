@@ -85,6 +85,7 @@ export function normalizeSearchCandidate(value: unknown): CatalogCandidate {
     artist: split >= 0 ? combined.slice(0, split) : "",
     title: split >= 0 ? combined.slice(split + 3) : combined,
     year: year(raw.year),
+    originalYear: null,
     genres: [...new Set([...texts(raw.genre), ...texts(raw.style)])],
     label: [...new Set(texts(raw.label))].join(" / "),
     catalogNumber: text(raw.catno),
@@ -116,6 +117,7 @@ export function normalizeRelease(value: unknown): CatalogCandidate {
       .join(" & "),
     title: text(raw.title),
     year: year(raw.year),
+    originalYear: null,
     genres: [...new Set([...texts(raw.genres), ...texts(raw.styles)])],
     label: [
       ...new Set(labels.map((label) => text(label.name)).filter(Boolean)),
@@ -228,7 +230,51 @@ async function discogs(path: string): Promise<unknown> {
   }
 }
 
-const pendingReleases = new Map<string, Promise<CatalogCandidate>>();
+type CachedRelease = {
+  candidate: CatalogCandidate;
+  masterId: number | null;
+  invalidMasterId?: boolean;
+};
+type ReleaseResult = {
+  candidate: CatalogCandidate;
+  originalYearResolved: boolean;
+};
+const pendingReleases = new Map<string, Promise<ReleaseResult>>();
+const pendingMasterYears = new Map<string, Promise<number | null>>();
+
+export function normalizeMasterYear(
+  value: unknown,
+  expectedId: number,
+): number | null {
+  const master = object(value);
+  if (typeof master.id !== "number" || master.id !== expectedId)
+    throw new HttpError(
+      502,
+      "Discogs returned a different master release. Please try again.",
+    );
+  return year(master.year);
+}
+
+async function fetchMasterYear(
+  masterId: number,
+  refresh: boolean,
+): Promise<number | null> {
+  const key = `${masterId}:${refresh}`;
+  const pending = pendingMasterYears.get(key);
+  if (pending) return pending;
+  const task = cached(
+    `master-year:v1:${masterId}`,
+    async () =>
+      normalizeMasterYear(await discogs(`/masters/${masterId}`), masterId),
+    refresh,
+  );
+  pendingMasterYears.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (pendingMasterYears.get(key) === task) pendingMasterYears.delete(key);
+  }
+}
 
 export async function searchCatalog(
   input: CatalogSearch,
@@ -265,37 +311,92 @@ export async function searchCatalog(
   });
 }
 
-export async function fetchRelease(
+async function releaseResult(
   releaseId: number,
-  options: { refresh?: boolean } = {},
-): Promise<CatalogCandidate> {
+  options: { refresh?: boolean; includeOriginalYear?: boolean } = {},
+): Promise<ReleaseResult> {
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(releaseId);
-  const { refresh = false } = z
-    .object({ refresh: z.boolean().optional() })
+  const { refresh = false, includeOriginalYear = true } = z
+    .object({
+      refresh: z.boolean().optional(),
+      includeOriginalYear: z.boolean().optional(),
+    })
     .strict()
     .parse(options);
   // Duplicate copies often render together. Share an in-flight refresh instead
   // of spending one provider request per visible copy in this instance.
-  const key = `${releaseId}:${refresh}`;
+  const key = `${releaseId}:${refresh}:${includeOriginalYear}`;
   const pending = pendingReleases.get(key);
   if (pending) return pending;
-  const result = cached(
-    `release:${releaseId}`,
-    async () => {
-      const release = normalizeRelease(await discogs(`/releases/${releaseId}`));
-      if (release.discogsId !== releaseId)
-        throw new HttpError(
-          502,
-          "Discogs returned a different release. Please try again.",
-        );
-      return release;
-    },
-    refresh,
-  );
+  const result = (async () => {
+    const stored = await cached<CachedRelease>(
+      `release:v2:${releaseId}`,
+      async () => {
+        const raw = object(await discogs(`/releases/${releaseId}`));
+        const release = normalizeRelease(raw);
+        if (release.discogsId !== releaseId)
+          throw new HttpError(
+            502,
+            "Discogs returned a different release. Please try again.",
+          );
+        const masterId =
+          typeof raw.master_id === "number" &&
+          Number.isSafeInteger(raw.master_id) &&
+          raw.master_id > 0
+            ? raw.master_id
+            : null;
+        const invalidMasterId =
+          raw.master_id !== undefined &&
+          raw.master_id !== null &&
+          raw.master_id !== 0 &&
+          masterId === null;
+        return {
+          candidate: release,
+          masterId,
+          ...(invalidMasterId ? { invalidMasterId: true } : {}),
+        };
+      },
+      refresh,
+    );
+    let originalYear: number | null = null;
+    let originalYearResolved = includeOriginalYear && !stored.invalidMasterId;
+    if (includeOriginalYear && stored.masterId !== null) {
+      try {
+        originalYear = await fetchMasterYear(stored.masterId, refresh);
+      } catch {
+        originalYearResolved = false;
+        // An unavailable master must not block adding a pressing or loading
+        // its artwork. Leave this unknown, never infer it from pressing.year.
+      }
+    }
+    return {
+      candidate: { ...stored.candidate, originalYear },
+      originalYearResolved,
+    };
+  })();
   pendingReleases.set(key, result);
   try {
     return await result;
   } finally {
     pendingReleases.delete(key);
   }
+}
+
+export async function fetchRelease(
+  releaseId: number,
+  options: { refresh?: boolean; includeOriginalYear?: boolean } = {},
+): Promise<CatalogCandidate> {
+  return (await releaseResult(releaseId, options)).candidate;
+}
+
+/** Distinguishes a genuinely unknown year from a provider outage for safe backfills. */
+export async function fetchOriginalYear(releaseId: number): Promise<{
+  originalYear: number | null;
+  resolved: boolean;
+}> {
+  const result = await releaseResult(releaseId);
+  return {
+    originalYear: result.candidate.originalYear ?? null,
+    resolved: result.originalYearResolved,
+  };
 }

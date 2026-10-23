@@ -20,9 +20,15 @@ const boundedText = (maximum: number) =>
 
 export const notebookShopIdSchema = z
   .string()
-  .max(32)
-  .regex(/^(node|way|relation)\/[1-9]\d*$/)
-  .refine((value) => Number.isSafeInteger(Number(value.split("/")[1])));
+  .max(90)
+  .regex(
+    /^(?:(?:node|way|relation)\/[1-9]\d*|directory\/[a-z0-9]+(?:-[a-z0-9]+)*)$/,
+  )
+  .refine(
+    (value) =>
+      value.startsWith("directory/") ||
+      Number.isSafeInteger(Number(value.split("/")[1])),
+  );
 
 const websiteSchema = z
   .string()

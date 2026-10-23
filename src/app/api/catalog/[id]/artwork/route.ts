@@ -21,7 +21,9 @@ export async function GET(
       .pipe(z.number().int().positive().max(Number.MAX_SAFE_INTEGER))
       .parse(id);
     await consumeIntegrationLimit(collector.id, "catalog-artwork", 240, 60);
-    const release = await fetchRelease(releaseId);
+    const release = await fetchRelease(releaseId, {
+      includeOriginalYear: false,
+    });
     const image = safeDiscogsImage(release.coverUrl);
     if (!image)
       throw new HttpError(404, "No cover image is listed for this release.");

@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
+  ArrowUp,
+  ArrowDown,
+  Check,
   Clock3,
   Compass,
   Disc3,
@@ -10,9 +13,12 @@ import {
   LocateFixed,
   MapPin,
   Navigation,
+  Plus,
+  Route,
   RefreshCw,
   Search,
   Store,
+  X,
 } from "lucide-react";
 import {
   approximateShopArea,
@@ -33,6 +39,13 @@ import {
   ShopRating,
   useShopNotebook,
 } from "./shop-notebook";
+import {
+  MAX_DIG_STOPS,
+  digRouteUrl,
+  moveDigStop,
+  newShopsInExpandedArea,
+} from "@/lib/shop-pathfinder";
+import styles from "./shop-pathfinder.module.css";
 
 type SelectedArea = ShopArea & { label: string };
 type Result = NearbyShops & { label: string };
@@ -44,6 +57,7 @@ const radiusLabels: Record<ShopRadiusKm, string> = {
   10: "6 miles",
   25: "15 miles",
   50: "30 miles",
+  100: "60 miles",
 };
 
 function mapsSearch(area: ShopArea | null, label?: string) {
@@ -59,12 +73,18 @@ function ShopCard({
   saved,
   notebookReady,
   onEdit,
+  routePosition,
+  routeFull,
+  onRouteToggle,
 }: {
   shop: RecordShop;
   index: number;
   saved?: SavedShop;
   notebookReady: boolean;
   onEdit: (shop: ShopSnapshot, saved: SavedShop | null) => void;
+  routePosition: number;
+  routeFull: boolean;
+  onRouteToggle: (shop: RecordShop) => void;
 }) {
   const miles = shop.distanceKm * 0.621371;
   const distance =
@@ -118,6 +138,23 @@ function ShopCard({
         >
           Directions <ArrowUpRight size={16} />
         </a>
+        <Button
+          className={styles.addStop}
+          variant="secondary"
+          disabled={routeFull && routePosition < 0}
+          aria-pressed={routePosition >= 0}
+          aria-label={
+            routePosition >= 0 ? "Remove from dig route" : "Add to dig route"
+          }
+          onClick={() => onRouteToggle(shop)}
+        >
+          {routePosition >= 0 ? <Check size={14} /> : <Plus size={14} />}
+          {routePosition >= 0
+            ? `Stop ${routePosition + 1} · Added`
+            : routeFull
+              ? "Route full"
+              : "Add to dig route"}
+        </Button>
         {shop.website && (
           <a
             className="shop-text-link"
@@ -154,6 +191,129 @@ function ShopCard({
   );
 }
 
+function DigRoute({
+  center,
+  label,
+  stops,
+  onRemove,
+  onMove,
+  onClear,
+}: {
+  center: ShopArea;
+  label: string;
+  stops: RecordShop[];
+  onRemove: (shop: RecordShop) => void;
+  onMove: (index: number, direction: -1 | 1) => void;
+  onClear: () => void;
+}) {
+  const href = digRouteUrl(center, stops);
+  return (
+    <section className={styles.digRoute} aria-label="Your dig route">
+      <div className={styles.routeHeading}>
+        <div className={styles.routeTitle}>
+          <span className={styles.routeIcon}>
+            <Route size={22} />
+          </span>
+          <div>
+            <span className="eyebrow">MAKE A DAY OF IT</span>
+            <h3>
+              Your dig route<span>.</span>
+            </h3>
+          </div>
+        </div>
+        <span className={styles.routeCount}>
+          {stops.length}
+          <span> / {MAX_DIG_STOPS} STOPS</span>
+        </span>
+      </div>
+      {stops.length ? (
+        <>
+          <div className={styles.routeStart}>
+            <MapPin size={12} /> Starting near {label}
+          </div>
+          <ol className={styles.routeStops}>
+            {stops.map((stop, index) => (
+              <li key={stop.id}>
+                <span className={styles.stopNumber}>{index + 1}</span>
+                <div className={styles.stopDetails}>
+                  <strong>{stop.name}</strong>
+                  <span>
+                    {stop.address ||
+                      "Use directions for the shop’s mapped location."}
+                  </span>
+                </div>
+                <div className={styles.stopActions}>
+                  <button
+                    type="button"
+                    aria-label={`Move ${stop.name} earlier`}
+                    disabled={index === 0}
+                    onClick={() => onMove(index, -1)}
+                  >
+                    <ArrowUp size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${stop.name} later`}
+                    disabled={index === stops.length - 1}
+                    onClick={() => onMove(index, 1)}
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${stop.name} from dig route`}
+                    onClick={() => onRemove(stop)}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className={styles.routeFooter}>
+            <button
+              type="button"
+              className={styles.clearRoute}
+              onClick={onClear}
+            >
+              Clear route
+            </button>
+            {href && (
+              <a
+                className={styles.openRoute}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open dig route <ArrowUpRight size={16} />
+              </a>
+            )}
+          </div>
+          <p className={styles.routePrivacy}>
+            Google Maps opens with your approximate starting area and chosen
+            stop order. It calculates the drive; you can adjust the start there.
+          </p>
+        </>
+      ) : (
+        <div className={styles.routeEmpty}>
+          <div aria-hidden="true">
+            {[1, 2, 3, 4].map((number) => (
+              <span key={number}>{number}</span>
+            ))}
+          </div>
+          <p>
+            Add up to four shops below. Put them in your order, then take the
+            whole dig to Google Maps.
+          </p>
+        </div>
+      )}
+      <p className={styles.routeSession}>
+        This route stays in this tab until you leave or choose a new area.
+      </p>
+    </section>
+  );
+}
+
 export function ShopsView() {
   const notebook = useShopNotebook();
   const [editingShop, setEditingShop] = useState<{
@@ -169,6 +329,10 @@ export function ShopsView() {
   const [busy, setBusy] = useState<"" | "location" | "places" | "nearby">("");
   const [error, setError] = useState("");
   const [retry, setRetry] = useState<Retry | null>(null);
+  const [shopFilter, setShopFilter] = useState("");
+  const [digStops, setDigStops] = useState<RecordShop[]>([]);
+  const [routeMessage, setRouteMessage] = useState("");
+  const [expansionMessage, setExpansionMessage] = useState("");
   const sequence = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const currentRadius = useRef(radius);
@@ -201,6 +365,7 @@ export function ShopsView() {
     setSelected(safeArea);
     setPlaces([]);
     setPlaceQuery("");
+    setExpansionMessage("");
     try {
       const response = await api<NearbyShops>("/api/shops/nearby", {
         method: "POST",
@@ -212,6 +377,25 @@ export function ShopsView() {
         }),
       });
       if (id !== sequence.current) return;
+      const added = newShopsInExpandedArea(result, response);
+      if (added === 0) {
+        setExpansionMessage(
+          `${response.shops.length === result?.shops.length ? `Same ${response.shops.length} shops in the wider radius. ` : ""}No additional verified vinyl shops were found in the available listings within ${radiusLabels[nextRadius]}.`,
+        );
+      } else if (added !== null) {
+        setExpansionMessage(
+          `${added} more ${added === 1 ? "shop" : "shops"} to dig through in this wider search.`,
+        );
+      }
+      if (
+        result &&
+        (response.center.latitude !== result.center.latitude ||
+          response.center.longitude !== result.center.longitude)
+      ) {
+        setDigStops([]);
+        setShopFilter("");
+        setRouteMessage("New area selected. Your dig route has been cleared.");
+      }
       setResult({ ...response, label: safeArea.label });
     } catch (err) {
       if (id !== sequence.current) return;
@@ -307,18 +491,40 @@ export function ShopsView() {
 
   const shops =
     result?.shops.slice().sort((a, b) => a.distanceKm - b.distanceKm) || [];
+  const filterText = shopFilter.trim().toLocaleLowerCase();
+  const filteredShops = filterText
+    ? shops.filter((shop) =>
+        `${shop.name} ${shop.address || ""}`
+          .toLocaleLowerCase()
+          .includes(filterText),
+      )
+    : shops;
   const savedById = new Map(
     notebook.shops.map((entry) => [entry.shop.id, entry]),
   );
   function editShop(shop: ShopSnapshot, saved: SavedShop | null) {
     if (notebook.status === "ready") setEditingShop({ shop, saved });
   }
+  function toggleRouteShop(shop: RecordShop) {
+    const present = digStops.some((stop) => stop.id === shop.id);
+    if (!present && digStops.length >= MAX_DIG_STOPS) return;
+    setDigStops((current) =>
+      present
+        ? current.filter((stop) => stop.id !== shop.id)
+        : [...current, shop],
+    );
+    setRouteMessage(
+      present
+        ? `${shop.name} removed from your dig route.`
+        : `${shop.name} added as stop ${digStops.length + 1}.`,
+    );
+  }
   return (
     <div className="shops-view">
       <header className="shops-hero">
         <div className="shops-hero-copy">
           <span className="eyebrow">
-            <span /> OUT IN THE REAL WORLD
+            <span /> WAX PATHFINDER / OUT IN THE REAL WORLD
           </span>
           <h1>
             Go find
@@ -327,7 +533,7 @@ export function ShopsView() {
           </h1>
           <p>
             Some records find you. The rest are waiting in a crate around the
-            corner.
+            corner. Find your spots. Pick your stops. Make a day of it.
           </p>
         </div>
         <div className="shops-hero-art" aria-hidden="true">
@@ -407,7 +613,7 @@ export function ShopsView() {
               </Button>
             </div>
           </form>
-          <fieldset className="shops-radius">
+          <fieldset className={`shops-radius ${styles.radiusPicker}`}>
             <legend>How far?</legend>
             <div>
               {SHOP_RADII_KM.map((value) => (
@@ -415,6 +621,7 @@ export function ShopsView() {
                   <input
                     type="radio"
                     name="shops-radius"
+                    aria-label={radiusLabels[value]}
                     checked={radius === value}
                     value={value}
                     onChange={() => {
@@ -423,7 +630,10 @@ export function ShopsView() {
                       if (selected) void findNearby(selected, value);
                     }}
                   />
-                  <span>{radiusLabels[value]}</span>
+                  <span>
+                    {radiusLabels[value]}
+                    {value === 100 && <small>DAY TRIP</small>}
+                  </span>
                 </label>
               ))}
             </div>
@@ -481,6 +691,9 @@ export function ShopsView() {
       </section>
 
       <SavedShops notebook={notebook} onEdit={editShop} />
+      <span className="sr-only" role="status">
+        {routeMessage}
+      </span>
 
       <div className="shops-status" role="status" aria-live="polite">
         {busy === "places" ? (
@@ -528,25 +741,107 @@ export function ShopsView() {
               Search Google Maps <ArrowUpRight size={15} />
             </a>
           </div>
+          {expansionMessage && (
+            <p className={styles.expansionNotice} role="status">
+              <Compass size={18} />
+              <span>{expansionMessage}</span>
+            </p>
+          )}
+          {result.discovery?.mapAvailable === false && (
+            <div className={styles.partialNotice} role="status">
+              <div>
+                <strong>Map search is taking a break.</strong>
+                <p>
+                  These results come from our verified record retailer
+                  directory. Some local shops may be missing until map listings
+                  are available again.
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                busy={busy === "nearby"}
+                onClick={() =>
+                  void findNearby(
+                    { ...result.center, label: result.label },
+                    result.radiusKm,
+                  )
+                }
+              >
+                <RefreshCw size={14} /> Retry map search
+              </Button>
+            </div>
+          )}
+          <DigRoute
+            center={result.center}
+            label={result.label}
+            stops={digStops}
+            onRemove={toggleRouteShop}
+            onMove={(index, direction) => {
+              setDigStops((current) => moveDigStop(current, index, direction));
+              setRouteMessage(
+                `${digStops[index].name} moved ${direction === -1 ? "earlier" : "later"} in your route.`,
+              );
+            }}
+            onClear={() => {
+              setDigStops([]);
+              setRouteMessage("Your dig route is clear.");
+            }}
+          />
           {shops.length ? (
             <>
+              <div className={styles.resultsToolbar}>
+                <label htmlFor="shops-filter">
+                  <span>Filter these shops</span>
+                  <div>
+                    <Search size={16} />
+                    <input
+                      id="shops-filter"
+                      type="search"
+                      value={shopFilter}
+                      onChange={(event) => setShopFilter(event.target.value)}
+                      placeholder="Shop name, neighborhood, street…"
+                      maxLength={120}
+                      autoComplete="off"
+                    />
+                  </div>
+                </label>
+                <p role="status">
+                  Showing <strong>{filteredShops.length}</strong> of{" "}
+                  {shops.length} shops
+                </p>
+              </div>
+              {!filteredShops.length && (
+                <div className={styles.noFilterMatches}>
+                  <Search size={23} />
+                  <p>No shops match “{shopFilter}” in these results.</p>
+                  <Button variant="secondary" onClick={() => setShopFilter("")}>
+                    Clear shop filter
+                  </Button>
+                </div>
+              )}
               <ol className="shops-grid">
-                {shops.map((shop, index) => (
+                {filteredShops.map((shop) => (
                   <ShopCard
                     key={shop.id}
                     shop={shop}
-                    index={index}
+                    index={shops.findIndex((item) => item.id === shop.id)}
                     saved={savedById.get(shop.id)}
                     notebookReady={notebook.status === "ready"}
                     onEdit={editShop}
+                    routePosition={digStops.findIndex(
+                      (stop) => stop.id === shop.id,
+                    )}
+                    routeFull={digStops.length >= MAX_DIG_STOPS}
+                    onRouteToggle={toggleRouteShop}
                   />
                 ))}
               </ol>
               <p className="shops-results-note">
-                Listings need evidence of vinyl or record sales. Unconfirmed
-                music stores are left out. Distances are approximate and
-                measured in a straight line, not by road. Check listed hours
-                with the shop before heading out.
+                Listings need evidence of vinyl or record sales. Verified
+                retailer listings supplement the map search. Unconfirmed music
+                stores are left out. Distances are approximate and measured in a
+                straight line, not by road. Check listed hours with the shop
+                before heading out.
                 {result.limited &&
                   " Results are limited; try a smaller radius for a more focused search."}
               </p>
@@ -616,7 +911,8 @@ export function ShopsView() {
           >
             OpenStreetMap contributors
           </a>
-          . Community data can be incomplete or out of date.
+          . We also include verified record retailer listings. Results can be
+          incomplete or out of date.
         </p>
         <p>
           Your approximate search area is shared with{" "}

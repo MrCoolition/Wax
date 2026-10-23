@@ -1,0 +1,414 @@
+.radiusPicker > div {
+  flex-wrap: wrap;
+}
+.radiusPicker label > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 43px;
+}
+.radiusPicker label > span > small {
+  font-size: 6px;
+  letter-spacing: 0.7px;
+  color: var(--orange);
+  font-weight: 700;
+}
+.addStop[aria-pressed="true"] {
+  background: #e7e1cb;
+  border-color: #9a8b5a;
+  color: #534726;
+}
+.expansionNotice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #c9ba91;
+  background: #eee5ce;
+  color: #62522b;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-bottom: 18px;
+}
+.partialNotice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 17px 20px;
+  border: 1px solid #d7b69f;
+  background: #f3e8db;
+  margin-bottom: 18px;
+}
+.partialNotice strong {
+  font-size: 12px;
+}
+.partialNotice p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #79624f;
+  margin-top: 3px;
+  max-width: 600px;
+}
+.partialNotice button {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.digRoute {
+  padding: 24px 27px 18px;
+  background: #292d23;
+  color: #f4edd9;
+  border-top: 3px solid var(--mustard);
+  margin: 22px 0 24px;
+}
+.routeHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+.routeTitle {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.routeIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #686645;
+  color: #dfbd68;
+  border-radius: 50%;
+}
+.routeTitle :global(.eyebrow) {
+  color: #c9bb87;
+  font-size: 7px;
+  letter-spacing: 1.6px;
+}
+.routeTitle h3 {
+  font-family: var(--display);
+  font-size: 32px;
+  line-height: 1.1;
+  margin-top: 5px;
+  font-weight: 500;
+}
+.routeTitle h3 > span {
+  color: #ddb658;
+}
+.routeCount {
+  color: #ddbb68;
+  font-family: var(--display);
+  font-size: 32px;
+  white-space: nowrap;
+}
+.routeCount > span {
+  color: #b6b69d;
+  font-family: var(--font-body), sans-serif;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+.routeEmpty {
+  display: flex;
+  gap: 23px;
+  align-items: center;
+  padding: 22px 0 6px;
+}
+.routeEmpty > div {
+  display: flex;
+  gap: 18px;
+}
+.routeEmpty > div > span {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border: 1px dashed #9d9162;
+  border-radius: 50%;
+  font-size: 10px;
+  color: #d4c591;
+  position: relative;
+}
+.routeEmpty > div > span:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 29px;
+  width: 14px;
+  top: 12px;
+  border-top: 1px dashed #8d8259;
+}
+.routeEmpty p {
+  max-width: 480px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: #c4c5ad;
+}
+.routeStart {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  color: #b7bca3;
+  margin: 20px 0 12px;
+}
+.routeStops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.routeStops > li {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px;
+  background: #353c2c;
+  border: 1px solid #535e43;
+  min-width: 0;
+}
+.stopNumber {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
+  background: #dbb764;
+  color: #343321;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stopDetails {
+  flex: 1;
+  min-width: 0;
+}
+.stopDetails strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.stopDetails > span {
+  display: block;
+  font-size: 9px;
+  color: #b6bfa1;
+  margin-top: 4px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.stopActions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.stopActions button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #677252;
+  color: #dfdfbf;
+}
+.stopActions button:hover:not(:disabled) {
+  background: #535d40;
+}
+.stopActions button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+.routeFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 17px;
+}
+.clearRoute {
+  color: #c5cbb1;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 10px 0;
+}
+.openRoute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: #302c20;
+  background: #dfba63;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 44px;
+}
+.openRoute:hover {
+  background: #edca79;
+}
+.routePrivacy {
+  margin-top: 14px;
+  color: #aeb59a;
+  font-size: 9px;
+  line-height: 1.9;
+}
+.routeSession {
+  margin-top: 15px;
+  padding-top: 12px;
+  border-top: 1px solid #4f563e;
+  color: #9ea78a;
+  font-size: 8px;
+  line-height: 1.8;
+}
+.digRoute :is(button, a):focus-visible {
+  outline: 2px solid #edca79;
+  outline-offset: 3px;
+}
+.resultsToolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+  margin: 0 0 22px;
+}
+.resultsToolbar > label {
+  display: block;
+  width: 400px;
+  max-width: 100%;
+}
+.resultsToolbar label > span {
+  font-size: 10px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 7px;
+}
+.resultsToolbar label > div {
+  position: relative;
+}
+.resultsToolbar label svg {
+  position: absolute;
+  top: 14px;
+  left: 12px;
+  color: #878573;
+  pointer-events: none;
+}
+.resultsToolbar input {
+  padding-left: 37px;
+  font-size: 12px;
+  min-height: 44px;
+}
+.resultsToolbar > p {
+  font-size: 11px;
+  color: var(--muted);
+  padding-bottom: 12px;
+  white-space: nowrap;
+}
+.resultsToolbar strong {
+  color: var(--ink);
+}
+.noFilterMatches {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 35px 20px;
+  border: 1px dashed #c5bda8;
+  background: #eee9dc;
+  margin-bottom: 20px;
+  text-align: center;
+}
+.noFilterMatches p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.noFilterMatches button {
+  font-size: 11px;
+}
+@media (max-width: 900px) {
+  .routeEmpty {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+}
+@media (max-width: 640px) {
+  .radiusPicker label > span {
+    gap: 4px;
+    font-size: 10px;
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+  .radiusPicker label > span > small {
+    font-size: 5px;
+    letter-spacing: 0;
+  }
+  .digRoute {
+    padding: 20px 16px 15px;
+  }
+  .routeTitle {
+    gap: 9px;
+  }
+  .routeTitle h3 {
+    font-size: 29px;
+  }
+  .routeIcon {
+    width: 36px;
+    height: 36px;
+  }
+  .routeCount {
+    font-size: 27px;
+  }
+  .routeCount > span {
+    font-size: 7px;
+  }
+  .routeStops > li {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .stopDetails {
+    flex-basis: calc(100% - 40px);
+  }
+  .stopActions {
+    margin-left: 37px;
+    width: calc(100% - 37px);
+  }
+  .stopActions button {
+    width: 38px;
+    height: 36px;
+  }
+  .stopActions button:last-child {
+    margin-left: auto;
+  }
+  .routeFooter {
+    align-items: center;
+  }
+  .openRoute {
+    padding: 11px 12px;
+    font-size: 10px;
+  }
+  .resultsToolbar {
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .resultsToolbar > label {
+    width: 100%;
+  }
+  .resultsToolbar input {
+    font-size: 16px;
+  }
+  .resultsToolbar > p {
+    font-size: 10px;
+    padding-bottom: 0;
+  }
+  .partialNotice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 15px;
+  }
+  .expansionNotice {
+    padding: 14px;
+    font-size: 11px;
+    align-items: flex-start;
+  }
+}

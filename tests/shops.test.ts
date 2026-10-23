@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   db: null as PGlite | null,
   fetch: vi.fn(),
   collector: vi.fn(),
+  directory: [] as Record<string, unknown>[],
 }));
 vi.mock("../src/server/db", () => ({
   getPool: () => ({
@@ -22,6 +23,9 @@ vi.mock("../src/server/db", () => ({
   }),
 }));
 vi.mock("../src/server/auth", () => ({ requireCollector: state.collector }));
+vi.mock("../src/server/shop-directory", () => ({
+  VERIFIED_RECORD_SHOPS: state.directory,
+}));
 import { HttpError } from "../src/server/http";
 import { approximateShopArea } from "../src/lib/shops";
 import {
@@ -30,6 +34,8 @@ import {
   nearbySchema,
   normalizePlaces,
   normalizeShops,
+  directoryShops,
+  mergeShopSources,
   placesSchema,
   searchShopPlaces,
   type OsmShopDetails,
@@ -110,6 +116,7 @@ describe("nearby record shop discovery", () => {
   });
   beforeEach(async () => {
     vi.clearAllMocks();
+    state.directory.length = 0;
     vi.stubGlobal("fetch", state.fetch);
     vi.stubEnv("PHOTON_API_URL", "https://photon.komoot.io/api/");
     vi.stubEnv("PHOTON_REVERSE_API_URL", "https://photon.komoot.io/reverse");
@@ -134,6 +141,9 @@ describe("nearby record shop discovery", () => {
     );
     expect(nearbySchema.safeParse({ ...area, radiusKm: 500 }).success).toBe(
       false,
+    );
+    expect(nearbySchema.safeParse({ ...area, radiusKm: 100 }).success).toBe(
+      true,
     );
     expect(nearbySchema.safeParse({ ...area, ownerId: "bob" }).success).toBe(
       false,
@@ -513,12 +523,23 @@ describe("nearby record shop discovery", () => {
         }),
         feature(12, -75, { name: "Record Store Studio", studio: "audio" }),
         feature(13, -75, { name: "Main Street Vinyl" }),
+        feature(14, -75, {
+          name: "Books and More",
+          osm_value: "books",
+          "sells:vinyl": "yes",
+        }),
+        feature(15, -75, {
+          name: "Secondhand Finds",
+          osm_value: "second_hand",
+          music: "vinyl;cd",
+        }),
+        feature(16, -75, { name: "Generic Book Store", osm_value: "books" }),
       ]),
       center,
       25,
     );
     expect(result.shops.map((shop) => shop.id).sort()).toEqual(
-      ["node/2", "node/3", "node/5", "node/13"].sort(),
+      ["node/2", "node/3", "node/5", "node/13", "node/14", "node/15"].sort(),
     );
   });
 
@@ -770,7 +791,7 @@ describe("nearby record shop discovery", () => {
     );
     expect(
       keys.rows.some(({ cache_key }) =>
-        cache_key.startsWith("nearby:vinyl-v2:"),
+        cache_key.startsWith("nearby:vinyl-v3:"),
       ),
     ).toBe(true);
   });
@@ -791,5 +812,184 @@ describe("nearby record shop discovery", () => {
       shops: [],
       limited: false,
     });
+  });
+
+  const verifiedEntry = (slug = "local-records", longitude = -75) => ({
+    slug,
+    name: slug.replace(/-/g, " "),
+    latitude: 40,
+    longitude,
+    address: "10 Main Street, Philadelphia",
+    website: "https://records.example.test/",
+    sourceUrl: "https://records.example.test/vinyl",
+    verifiedOn: new Date().toISOString().slice(0, 10),
+  });
+
+  it("expands genuine radius rings without a fixed result count and expires reviewed facts", () => {
+    const entries = [
+      verifiedEntry("near", -75.05),
+      verifiedEntry("town", -75.2),
+      verifiedEntry("regional", -75.45),
+      verifiedEntry("day-trip", -75.9),
+    ];
+    expect(
+      [10, 25, 50, 100].map(
+        (radius) => directoryShops(center, radius, entries).length,
+      ),
+    ).toEqual([1, 2, 3, 4]);
+    const now = Date.parse("2026-10-23T00:00:00Z");
+    const dated = [
+      { ...verifiedEntry(), verifiedOn: "2026-10-23" },
+      { ...verifiedEntry("expired"), verifiedOn: "2026-04-26" },
+      { ...verifiedEntry("future"), verifiedOn: "2026-10-24" },
+      { ...verifiedEntry("invalid"), verifiedOn: "not-a-date" },
+    ];
+    expect(
+      directoryShops(center, 25, dated, now).map((shop) => shop.id),
+    ).toEqual(["directory/local-records"]);
+    const [shop] = directoryShops(center, 25, entries);
+    expect(shop).toMatchObject({
+      osmUrl: null,
+      sourceLabel: "Verified retailer",
+    });
+  });
+
+  it("keeps existing OSM identities on conservative directory matches and reports only actual truncation", () => {
+    const mapped = normalizeShops(
+      collection([feature(44, -75, { name: "Good Records" })]),
+      center,
+      25,
+    ).shops;
+    const verified = directoryShops(center, 25, [
+      {
+        ...verifiedEntry("good-records", -75.0001),
+        name: "GOOD RECORDS",
+        osmId: "node/44",
+      },
+    ]);
+    const merged = mergeShopSources(mapped, verified);
+    expect(merged.shops).toHaveLength(1);
+    expect(merged.shops[0]).toMatchObject({
+      id: "node/44",
+      sourceLabel: "Verified retailer",
+    });
+    expect(merged.directoryCount).toBe(1);
+    expect(
+      mergeShopSources(
+        mapped,
+        directoryShops(center, 25, [
+          { ...verifiedEntry("other-location", -75.1), name: "Good Records" },
+        ]),
+      ).shops,
+    ).toHaveLength(2);
+    const many = directoryShops(
+      center,
+      25,
+      Array.from({ length: 201 }, (_, i) => verifiedEntry(`shop-${i}`)),
+    );
+    expect(mergeShopSources([], many)).toMatchObject({
+      limited: true,
+      directoryCount: 200,
+    });
+    expect(mergeShopSources([], many).shops).toHaveLength(200);
+  });
+
+  it("coalesces concurrent identical public searches", async () => {
+    state.fetch.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return Response.json(collection());
+    });
+    const [first, second] = await Promise.all([
+      findNearbyShops(area),
+      findNearbyShops(area),
+    ]);
+    expect(first).toEqual(second);
+    expect(state.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a previously unmapped directory identity stable when the map later finds the same shop", () => {
+    const mapped = normalizeShops(
+      collection([feature(999, -75, { name: "Local Records" })]),
+      center,
+      25,
+    ).shops;
+    const verified = directoryShops(center, 25, [verifiedEntry()]);
+    const available = mergeShopSources(mapped, verified);
+    const outage = mergeShopSources([], verified);
+    expect(available.shops).toHaveLength(1);
+    expect(available.shops[0].id).toBe("directory/local-records");
+    expect(outage.shops[0].id).toBe(available.shops[0].id);
+    expect(mapped[0].id).toBe("node/999");
+  });
+
+  it("returns verified directory shops on a map outage without caching the failure", async () => {
+    state.directory.push(verifiedEntry());
+    state.fetch.mockRejectedValueOnce(new Error("outage"));
+    const result = await findNearbyShops(area);
+    expect(result.shops.map((shop) => shop.id)).toEqual([
+      "directory/local-records",
+    ]);
+    expect(result.discovery).toEqual({
+      mapAvailable: false,
+      directoryCount: 1,
+    });
+    expect(await cacheCount()).toBe(0);
+    state.directory.length = 0;
+    await allowProvider();
+    state.fetch.mockRejectedValueOnce(new Error("outage"));
+    await expect(findNearbyShops(area)).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("never restores a known mapped directory shop without current map evidence during an outage", async () => {
+    state.directory.push(verifiedEntry(), {
+      ...verifiedEntry("mapped-shop"),
+      osmId: "node/50",
+    });
+    state.fetch.mockRejectedValueOnce(new Error("outage"));
+    const partial = await findNearbyShops(area);
+    expect(partial.shops.map((shop) => shop.id)).toEqual([
+      "directory/local-records",
+    ]);
+    expect(partial.discovery).toEqual({
+      mapAvailable: false,
+      directoryCount: 1,
+    });
+    state.directory.splice(0, 1);
+    await allowProvider();
+    state.fetch.mockRejectedValueOnce(new Error("outage"));
+    await expect(findNearbyShops(area)).rejects.toMatchObject({ status: 503 });
+    expect(await cacheCount()).toBe(0);
+  });
+
+  it("merges directory facts after cache lookup and honors current mapped closure and no-vinyl tags", async () => {
+    state.directory.push({
+      ...verifiedEntry("generic-music"),
+      osmId: "node/50",
+    });
+    state.fetch
+      .mockResolvedValueOnce(Response.json(collection()))
+      .mockResolvedValueOnce(
+        Response.json({
+          elements: [
+            osmElement(50, { name: "generic music", "music:vinyl": "no" }),
+          ],
+        }),
+      );
+    expect((await findNearbyShops(area)).shops).toEqual([]);
+    expect(state.fetch).toHaveBeenCalledTimes(2);
+    // Non-OSM directory additions are visible immediately; only map data is cached.
+    state.directory.push(verifiedEntry("freshly-verified"));
+    const result = await findNearbyShops(area);
+    expect(result.shops.map((shop) => shop.id)).toEqual([
+      "directory/freshly-verified",
+    ]);
+    expect(result.discovery).toEqual({ mapAvailable: true, directoryCount: 1 });
+    expect(state.fetch).toHaveBeenCalledTimes(2);
+    const cachedData = JSON.stringify(
+      (await state.db!.query("SELECT payload FROM wax.shop_discovery_cache"))
+        .rows,
+    );
+    expect(cachedData).not.toContain("freshly-verified");
+    expect(cachedData).not.toContain("records.example.test/vinyl");
   });
 });

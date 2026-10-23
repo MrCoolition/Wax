@@ -521,7 +521,7 @@ export function CratesView() {
               <p>{record.artist}</p>
               <small>
                 {[
-                  record.year,
+                  record.originalYear ?? "Year unknown",
                   record.label,
                   record.catalogNumber,
                   record.country,

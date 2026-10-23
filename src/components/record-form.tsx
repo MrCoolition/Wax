@@ -32,7 +32,27 @@ export function CandidateFields({
           placeholder="The name on the sleeve"
         />
       </Field>
-      <Field label="Release year">
+      <Field
+        label="Album release year"
+        hint="When the album first came out, not the year of a reissue."
+      >
+        <input
+          type="number"
+          min="1877"
+          max={new Date().getFullYear() + 2}
+          value={value.originalYear ?? ""}
+          onChange={(e) =>
+            update({
+              originalYear: e.target.value ? Number(e.target.value) : null,
+            })
+          }
+          placeholder="Unknown is fine"
+        />
+      </Field>
+      <Field
+        label="Pressing year"
+        hint="The year of this particular edition, if known."
+      >
         <input
           type="number"
           min="1877"

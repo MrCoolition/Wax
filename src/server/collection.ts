@@ -32,6 +32,7 @@ export const candidateSchema = z
     artist: shortText.min(1),
     title: shortText.min(1),
     year: z.number().int().min(1850).max(2200).nullable(),
+    originalYear: z.number().int().min(1850).max(2200).nullable().optional(),
     genres: z.array(z.string().trim().max(100)).max(30),
     label: shortText,
     catalogNumber: shortText,
@@ -124,6 +125,7 @@ const copySelect = `SELECT c.*, COALESCE((SELECT array_agg(ci.crate_id) FROM wax
 function toCopy(row: CopyRow): RecordCopy {
   return {
     ...row.metadata,
+    originalYear: row.metadata.originalYear ?? null,
     coverUrl: catalogArtworkPath(row.metadata.discogsId),
     id: row.id,
     releaseId: row.release_id,
@@ -205,6 +207,9 @@ export async function getLibrary(userId: string): Promise<LibraryData> {
   ]);
   return {
     collector,
+    needsOriginalYears: copies.rows.some(
+      (row) => !Object.hasOwn(row.metadata, "originalYear"),
+    ),
     records: copies.rows.map(toCopy),
     crates: crateRows.rows.map((r) => ({
       id: r.id,
@@ -229,6 +234,7 @@ export async function getLibrary(userId: string): Promise<LibraryData> {
           pressingConfirmed: boolean;
         }) => ({
           ...p.metadata,
+          originalYear: p.metadata.originalYear ?? null,
           coverUrl: catalogArtworkPath(p.metadata.discogsId),
           id: p.id,
           mediaCondition: p.mediaCondition,
@@ -252,7 +258,12 @@ async function resolveCandidate(
   candidate: CatalogCandidate,
 ): Promise<{ metadata: CatalogCandidate; canonical: CatalogCandidate }> {
   if (candidate.discogsId === null) {
-    const clean = { ...candidate, coverUrl: null, sourceUrl: null };
+    const clean = {
+      ...candidate,
+      originalYear: candidate.originalYear ?? null,
+      coverUrl: null,
+      sourceUrl: null,
+    };
     return { metadata: clean, canonical: clean };
   }
   const canonical = candidateSchema.parse(
@@ -265,6 +276,7 @@ async function resolveCandidate(
     metadata: {
       ...candidate,
       discogsId: canonical.discogsId,
+      originalYear: candidate.originalYear ?? canonical.originalYear ?? null,
       coverUrl: null,
       sourceUrl: canonical.sourceUrl,
     },
@@ -680,7 +692,8 @@ export async function exportCollection(userId: string): Promise<Response> {
     "id",
     "artist",
     "title",
-    "year",
+    "originalYear",
+    "pressingYear",
     "label",
     "catalogNumber",
     "country",
@@ -697,7 +710,11 @@ export async function exportCollection(userId: string): Promise<Response> {
   ] as const;
   const csv = [
     fields.map(csvCell).join(","),
-    ...records.map((r) => fields.map((f) => csvCell(r[f])).join(",")),
+    ...records.map((r) =>
+      fields
+        .map((f) => csvCell(f === "pressingYear" ? r.year : r[f]))
+        .join(","),
+    ),
   ].join("\r\n");
   return new Response("\uFEFF" + csv, {
     headers: {

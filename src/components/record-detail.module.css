@@ -1,0 +1,43 @@
+.actionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 20px;
+}
+
+.actionPanel :global(.detail-art-actions) {
+  margin: 0;
+}
+
+.exploreLink {
+  width: 100%;
+  min-height: 44px;
+  font-size: 12px;
+}
+
+.attribution {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+
+.actionPanel .attribution :global(.source-credit) {
+  margin: 0;
+  max-width: 100%;
+  line-height: 1.8;
+}
+
+@media (min-width: 681px) and (max-width: 900px) {
+  .actionPanel {
+    align-self: center;
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .actionPanel {
+    margin-top: 16px;
+  }
+}
