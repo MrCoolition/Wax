@@ -41,6 +41,7 @@ export function safeDiscogsImage(value: unknown): string | null {
     const url = new URL(value);
     return url.protocol === "https:" &&
       ["i.discogs.com", "img.discogs.com"].includes(url.hostname) &&
+      !url.port &&
       !url.username &&
       !url.password
       ? url.href
@@ -48,6 +49,15 @@ export function safeDiscogsImage(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+// A same-origin resolver keeps saved records independent of expiring CDN links.
+// It is generated from a provider ID, never a user-supplied URL.
+export function catalogArtworkPath(releaseId: unknown): string | null {
+  return typeof releaseId === "number" &&
+    Number.isSafeInteger(releaseId) &&
+    releaseId > 0
+    ? `/api/catalog/${releaseId}/artwork`
+    : null;
 }
 function year(value: unknown): number | null {
   const n =
@@ -157,6 +167,7 @@ async function discogs(path: string): Promise<unknown> {
       },
       signal: AbortSignal.timeout(15_000),
       cache: "no-store",
+      redirect: "error",
     });
     if (response.status === 429)
       throw new HttpError(
@@ -179,7 +190,35 @@ async function discogs(path: string): Promise<unknown> {
         503,
         "Discogs lookup is unavailable right now. You can retry or add this record manually.",
       );
-    return await response.json();
+    const maximum = 2 * 1024 * 1024;
+    if (Number(response.headers.get("content-length")) > maximum)
+      throw new HttpError(
+        502,
+        "Discogs returned too much data. Please try again.",
+      );
+    const reader = response.body?.getReader();
+    if (!reader)
+      throw new HttpError(502, "Discogs returned an empty response.");
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > maximum) {
+          await reader.cancel();
+          throw new HttpError(
+            502,
+            "Discogs returned too much data. Please try again.",
+          );
+        }
+        chunks.push(value);
+      }
+      return JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
+    } finally {
+      reader.releaseLock();
+    }
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(
@@ -188,6 +227,8 @@ async function discogs(path: string): Promise<unknown> {
     );
   }
 }
+
+const pendingReleases = new Map<string, Promise<CatalogCandidate>>();
 
 export async function searchCatalog(
   input: CatalogSearch,
@@ -233,9 +274,28 @@ export async function fetchRelease(
     .object({ refresh: z.boolean().optional() })
     .strict()
     .parse(options);
-  return cached(
+  // Duplicate copies often render together. Share an in-flight refresh instead
+  // of spending one provider request per visible copy in this instance.
+  const key = `${releaseId}:${refresh}`;
+  const pending = pendingReleases.get(key);
+  if (pending) return pending;
+  const result = cached(
     `release:${releaseId}`,
-    async () => normalizeRelease(await discogs(`/releases/${releaseId}`)),
+    async () => {
+      const release = normalizeRelease(await discogs(`/releases/${releaseId}`));
+      if (release.discogsId !== releaseId)
+        throw new HttpError(
+          502,
+          "Discogs returned a different release. Please try again.",
+        );
+      return release;
+    },
     refresh,
   );
+  pendingReleases.set(key, result);
+  try {
+    return await result;
+  } finally {
+    pendingReleases.delete(key);
+  }
 }

@@ -81,6 +81,9 @@ async function mockLibrary(page: Page) {
   await page.route("**/api/library", (route) =>
     route.fulfill({ json: library }),
   );
+  await page.route("**/api/shops/notebook", (route) =>
+    route.fulfill({ json: { shops: [] } }),
+  );
 }
 
 async function expectNoOverflow(page: Page) {

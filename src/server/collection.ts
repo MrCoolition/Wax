@@ -16,7 +16,7 @@ import type {
 import { CONDITIONS } from "@/lib/contracts";
 import { getPool, withTransaction } from "./db";
 import { HttpError } from "./http";
-import { fetchRelease, safeDiscogsImage } from "./catalog";
+import { catalogArtworkPath, fetchRelease } from "./catalog";
 
 type Client = Pool | PoolClient;
 const lockCollection = (client: PoolClient, userId: string) =>
@@ -37,7 +37,15 @@ export const candidateSchema = z
     catalogNumber: shortText,
     country: shortText,
     format: shortText,
-    coverUrl: z.string().url().nullable(),
+    coverUrl: z
+      .union([
+        z.string().url(),
+        z
+          .string()
+          .max(64)
+          .regex(/^\/api\/catalog\/[1-9]\d*\/artwork$/),
+      ])
+      .nullable(),
     sourceUrl: z.string().url().nullable(),
   })
   .strict();
@@ -109,17 +117,14 @@ type CopyRow = Record<string, unknown> & {
   metadata: CatalogCandidate;
   version: number;
 };
-const freshCoverSql = (alias: string) =>
-  `(SELECT cc.payload->>'coverUrl' FROM wax.catalog_cache cc WHERE cc.cache_key='release:'||(${alias}.metadata->>'discogsId') AND cc.fetched_at>now()-interval '6 hours')`;
 const copySelect = `SELECT c.*, COALESCE((SELECT array_agg(ci.crate_id) FROM wax.crate_items ci WHERE ci.copy_id=c.id), '{}') AS crate_ids,
   (SELECT count(*)::int FROM wax.listens l WHERE l.copy_id=c.id AND l.owner_id=c.owner_id) AS spin_count,
   (SELECT max(played_at) FROM wax.listens l WHERE l.copy_id=c.id AND l.owner_id=c.owner_id) AS last_played_at,
-  COALESCE((SELECT array_agg(p.id) FROM wax.photos p WHERE p.copy_id=c.id AND p.owner_id=c.owner_id), '{}') AS photo_ids,
-  ${freshCoverSql("c")} AS fresh_cover_url FROM wax.copies c`;
+  COALESCE((SELECT array_agg(p.id) FROM wax.photos p WHERE p.copy_id=c.id AND p.owner_id=c.owner_id), '{}') AS photo_ids FROM wax.copies c`;
 function toCopy(row: CopyRow): RecordCopy {
   return {
     ...row.metadata,
-    coverUrl: safeDiscogsImage(row.fresh_cover_url),
+    coverUrl: catalogArtworkPath(row.metadata.discogsId),
     id: row.id,
     releaseId: row.release_id,
     version: row.version,
@@ -189,12 +194,12 @@ export async function getLibrary(userId: string): Promise<LibraryData> {
     ),
     db.query(
       `SELECT c.id,c.name,c.description,c.color,u.name AS owner_name,
-      COALESCE((SELECT jsonb_agg(jsonb_build_object('id',p.id,'metadata',p.metadata||jsonb_build_object('coverUrl',${freshCoverSql("p")}),'mediaCondition',p.media_condition,'sleeveCondition',p.sleeve_condition,'pressingConfirmed',p.pressing_confirmed)) FROM wax.crate_items ci JOIN wax.copies p ON p.id=ci.copy_id AND p.owner_id=c.owner_id WHERE ci.crate_id=c.id),'[]') AS records
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id',p.id,'metadata',p.metadata,'mediaCondition',p.media_condition,'sleeveCondition',p.sleeve_condition,'pressingConfirmed',p.pressing_confirmed)) FROM wax.crate_items ci JOIN wax.copies p ON p.id=ci.copy_id AND p.owner_id=c.owner_id WHERE ci.crate_id=c.id),'[]') AS records
       FROM wax.crate_shares s JOIN wax.crates c ON c.id=s.crate_id JOIN wax.users u ON u.id=c.owner_id WHERE s.recipient_id=$1 ORDER BY c.name`,
       [userId],
     ),
     db.query(
-      `SELECT l.id,l.copy_id,l.played_at,l.notes,c.metadata,${freshCoverSql("c")} AS fresh_cover_url FROM wax.listens l JOIN wax.copies c ON c.id=l.copy_id AND c.owner_id=l.owner_id WHERE l.owner_id=$1 ORDER BY l.played_at DESC,l.id LIMIT 500`,
+      `SELECT l.id,l.copy_id,l.played_at,l.notes,c.metadata FROM wax.listens l JOIN wax.copies c ON c.id=l.copy_id AND c.owner_id=l.owner_id WHERE l.owner_id=$1 ORDER BY l.played_at DESC,l.id LIMIT 500`,
       [userId],
     ),
   ]);
@@ -224,7 +229,7 @@ export async function getLibrary(userId: string): Promise<LibraryData> {
           pressingConfirmed: boolean;
         }) => ({
           ...p.metadata,
-          coverUrl: safeDiscogsImage(p.metadata.coverUrl),
+          coverUrl: catalogArtworkPath(p.metadata.discogsId),
           id: p.id,
           mediaCondition: p.mediaCondition,
           sleeveCondition: p.sleeveCondition,
@@ -237,7 +242,7 @@ export async function getLibrary(userId: string): Promise<LibraryData> {
       recordId: r.copy_id,
       artist: r.metadata.artist,
       title: r.metadata.title,
-      coverUrl: safeDiscogsImage(r.fresh_cover_url),
+      coverUrl: catalogArtworkPath(r.metadata.discogsId),
       playedAt: dateString(r.played_at),
       notes: r.notes,
     })),
