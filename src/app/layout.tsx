@@ -9,6 +9,7 @@ const display = Barlow_Condensed({
 const body = DM_Sans({ subsets: ["latin"], variable: "--font-body" });
 export const metadata: Metadata = {
   title: "WAX — Keep the good stuff.",
+  applicationName: "WAX",
   description: "Your records. Your rhythm. A home for the collection.",
 };
 export default function RootLayout({

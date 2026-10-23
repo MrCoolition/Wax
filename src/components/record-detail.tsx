@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   Check,
   RefreshCw,
+  GitBranch,
 } from "lucide-react";
 import type { CatalogCandidate, CopyFields, RecordCopy } from "@/lib/contracts";
 import { api, useLibrary } from "./library-provider";
@@ -323,6 +324,12 @@ export function RecordDetail({ id }: { id: string }) {
                 </Button>
               </div>
               <SourceCredit sourceUrl={record.sourceUrl} />
+              <Link
+                className="button button-secondary"
+                href={`/records/${record.id}/explore`}
+              >
+                <GitBranch size={16} /> Artist Tree
+              </Link>
               {record.photoIds.length > 0 && (
                 <div className="detail-photos">
                   {record.photoIds.map((photo) => (

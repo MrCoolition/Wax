@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>WAX</title>
+  <rect width="512" height="512" fill="#ba4729"/>
+  <circle cx="256" cy="256" r="220" fill="#23231f"/>
+  <g fill="none" stroke="#656255" stroke-width="2">
+    <circle cx="256" cy="256" r="207"/><circle cx="256" cy="256" r="196"/>
+    <circle cx="256" cy="256" r="184"/><circle cx="256" cy="256" r="173"/>
+  </g>
+  <circle cx="256" cy="256" r="153" fill="#f4e7bd"/>
+  <path d="M120 215h26l8 61 10-61h24l10 61 8-61h26l-22 102h-29l-5-44-8 44h-29z" fill="#23231f"/>
+  <path fill-rule="evenodd" d="M248 215h36l27 102h-28l-4-20h-25l-4 20h-27zm19 26-8 36h16z" fill="#23231f"/>
+  <path d="M309 215h29l12 31 12-31h29l-26 49 28 53h-30l-13-33-14 33h-29l28-53z" fill="#23231f"/>
+  <circle cx="256" cy="174" r="9" fill="#ba4729"/>
+  <path d="M209 345h94" stroke="#ba4729" stroke-width="7"/>
+  <path d="M104 100a220 220 0 0 1 88-48" fill="none" stroke="#f4e7bd" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="434" cy="399" r="27" fill="#d4ad4b" stroke="#23231f" stroke-width="8"/>
+</svg>
