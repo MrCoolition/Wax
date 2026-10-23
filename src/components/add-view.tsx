@@ -636,7 +636,9 @@ export function AddView() {
                       <p>{item.artist}</p>
                       <small>
                         {[
-                          item.year,
+                          item.year
+                            ? `Pressing: ${item.year}`
+                            : "Pressing year unknown",
                           item.country,
                           item.label,
                           item.catalogNumber,

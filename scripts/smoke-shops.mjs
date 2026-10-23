@@ -141,10 +141,53 @@ try {
     "Stanton's Sheet Music",
     "German Village Music Haus",
   ])
-    assert.ok(!names.includes(name), `Unconfirmed vinyl seller excluded: ${name}`);
+    assert.ok(
+      !names.includes(name),
+      `Unconfirmed vinyl seller excluded: ${name}`,
+    );
   console.log(
     `PASS: ${names.length} Columbus record shops; known vinyl sellers retained and broad music-store false positives excluded.`,
   );
+  assert.ok(
+    names.includes("Spoonful Records"),
+    "Missing-map retailer is included from checked sources",
+  );
+  assert.equal(columbus.result.discovery.mapAvailable, true);
+  let previous = columbus.result;
+  for (const radiusKm of [50, 100]) {
+    const expanded = await request("/api/shops/nearby", {
+      latitude: 40.02,
+      longitude: -83.04,
+      radiusKm,
+    });
+    assert.equal(
+      expanded.response.status,
+      200,
+      JSON.stringify(expanded.result),
+    );
+    assert.equal(expanded.result.discovery.mapAvailable, true);
+    assert.ok(
+      expanded.result.shops.length > previous.shops.length,
+      `Radius ${radiusKm}km discovers additional real shops`,
+    );
+    assert.ok(
+      expanded.result.shops.some((shop) => shop.distanceKm > previous.radiusKm),
+      "New results extend beyond the previous search circle",
+    );
+    assert.ok(
+      expanded.result.shops.every((shop) => shop.distanceKm <= radiusKm),
+    );
+    const expected =
+      radiusKm === 50 ? "Pat's Endangered Species" : "Legend Records";
+    assert.ok(
+      expanded.result.shops.some((shop) => shop.name === expected),
+      `Retains sourced regional seller ${expected}`,
+    );
+    console.log(
+      `PASS: ${radiusKm}km search expands to ${expanded.result.shops.length} live results, including ${expected}.`,
+    );
+    previous = expanded.result;
+  }
 } finally {
   await pool.query("DELETE FROM wax.invitations WHERE token_hash=$1", [digest]);
   await pool.query("DELETE FROM wax.users WHERE email=$1", [email]);

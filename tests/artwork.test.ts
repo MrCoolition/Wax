@@ -43,8 +43,14 @@ async function cache(
   cover = "https://i.discogs.com/cached.jpg",
 ) {
   await state.db!.query(
-    "INSERT INTO wax.catalog_cache(cache_key,payload,fetched_at) VALUES('release:42',$1::jsonb,now()-$2::interval)",
-    [JSON.stringify(normalizeRelease(upstreamRelease(cover))), age],
+    "INSERT INTO wax.catalog_cache(cache_key,payload,fetched_at) VALUES('release:v2:42',$1::jsonb,now()-$2::interval)",
+    [
+      JSON.stringify({
+        candidate: normalizeRelease(upstreamRelease(cover)),
+        masterId: null,
+      }),
+      age,
+    ],
   );
 }
 function expectPrivate(response: Response) {
@@ -96,11 +102,16 @@ describe("lazy authenticated record artwork", () => {
       redirect: "error",
     });
     const refreshed = (
-      await state.db!.query<{ payload: { coverUrl: string }; fresh: boolean }>(
-        "SELECT payload,fetched_at>now()-interval '1 minute' AS fresh FROM wax.catalog_cache WHERE cache_key='release:42'",
+      await state.db!.query<{
+        payload: { candidate: { coverUrl: string } };
+        fresh: boolean;
+      }>(
+        "SELECT payload,fetched_at>now()-interval '1 minute' AS fresh FROM wax.catalog_cache WHERE cache_key='release:v2:42'",
       )
     ).rows[0];
-    expect(refreshed.payload.coverUrl).toBe("https://i.discogs.com/fresh.jpg");
+    expect(refreshed.payload.candidate.coverUrl).toBe(
+      "https://i.discogs.com/fresh.jpg",
+    );
     expect(refreshed.fresh).toBe(true);
   });
 

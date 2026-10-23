@@ -11,6 +11,7 @@ import {
 import { getPool } from "./db";
 import { HttpError } from "./http";
 import { hasVinylSalesEvidence } from "./shop-vinyl";
+import { VERIFIED_RECORD_SHOPS } from "./shop-directory";
 
 export const placesSchema = z
   .object({
@@ -26,7 +27,12 @@ export const nearbySchema = z
   .object({
     latitude: z.number().finite().min(-90).max(90),
     longitude: z.number().finite().min(-180).max(180),
-    radiusKm: z.union([z.literal(10), z.literal(25), z.literal(50)]),
+    radiusKm: z.union([
+      z.literal(10),
+      z.literal(25),
+      z.literal(50),
+      z.literal(100),
+    ]),
   })
   .strict();
 type JsonObject = Record<string, unknown>;
@@ -179,6 +185,8 @@ async function providerJson(url: URL, details = false): Promise<unknown> {
   }
 }
 
+const pendingSearches = new Map<string, Promise<unknown>>();
+
 async function cached<T>(
   key: string,
   ttlSeconds: number,
@@ -192,14 +200,24 @@ async function cached<T>(
     [key],
   );
   if (found.rows[0]) return found.rows[0].payload;
-  const payload = await fetchValue();
-  await getPool().query(
-    `INSERT INTO wax.shop_discovery_cache(cache_key,payload,expires_at)
-    VALUES($1,$2::jsonb,now()+make_interval(secs => $3))
-    ON CONFLICT(cache_key) DO UPDATE SET payload=excluded.payload,expires_at=excluded.expires_at`,
-    [key, JSON.stringify(payload), ttlSeconds],
-  );
-  return payload;
+  const pending = pendingSearches.get(key);
+  if (pending) return pending as Promise<T>;
+  const task = (async () => {
+    const payload = await fetchValue();
+    await getPool().query(
+      `INSERT INTO wax.shop_discovery_cache(cache_key,payload,expires_at)
+      VALUES($1,$2::jsonb,now()+make_interval(secs => $3))
+      ON CONFLICT(cache_key) DO UPDATE SET payload=excluded.payload,expires_at=excluded.expires_at`,
+      [key, JSON.stringify(payload), ttlSeconds],
+    );
+    return payload;
+  })();
+  pendingSearches.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (pendingSearches.get(key) === task) pendingSearches.delete(key);
+  }
 }
 
 function coordinates(latitude: unknown, longitude: unknown): ShopArea | null {
@@ -358,7 +376,7 @@ async function currentShopDetails(value: unknown): Promise<OsmShopDetails> {
     way: new Set(),
     relation: new Set(),
   };
-  for (const feature of photonFeatures(value).slice(0, 100)) {
+  for (const feature of photonFeatures(value).slice(0, 200)) {
     const identity = osmIdentity(object(object(feature).properties));
     if (identity) grouped[identity.type].add(identity.id);
   }
@@ -377,7 +395,7 @@ async function currentShopDetails(value: unknown): Promise<OsmShopDetails> {
         const raw = object(await providerJson(url, true));
         if (
           !Array.isArray(raw.elements) ||
-          raw.elements.length > 100 ||
+          raw.elements.length > 200 ||
           raw.error !== undefined
         )
           throw unavailable();
@@ -486,6 +504,8 @@ export function normalizeShops(
       phone: safePhone(tags.phone) || safePhone(tags["contact:phone"]),
       openingHours: text(tags.opening_hours, 500) || null,
       osmUrl: `https://www.openstreetmap.org/${identity.key}`,
+      sourceUrl: `https://www.openstreetmap.org/${identity.key}`,
+      sourceLabel: "OpenStreetMap",
     };
     const duplicate = shops.find(
       (existing) =>
@@ -511,6 +531,118 @@ export function normalizeShops(
   };
 }
 
+type DirectoryEntry = {
+  slug: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  address: string;
+  website: string;
+  sourceUrl: string;
+  verifiedOn: string;
+  osmId?: string;
+};
+
+export function directoryShops(
+  center: ShopArea,
+  radiusKm: number,
+  entries: readonly DirectoryEntry[] = VERIFIED_RECORD_SHOPS,
+  now = Date.now(),
+): RecordShop[] {
+  const shops: RecordShop[] = [];
+  for (const entry of entries) {
+    const verifiedAt = Date.parse(`${entry.verifiedOn}T00:00:00Z`);
+    const age = now - verifiedAt;
+    // Rechecked facts are eligible for six months. Directory data is merged
+    // after the map cache lookup, so expiration never waits for a cache TTL.
+    if (!Number.isFinite(verifiedAt) || age < 0 || age >= 180 * 24 * 3600_000)
+      continue;
+    const point = coordinates(entry.latitude, entry.longitude);
+    const name = text(entry.name);
+    const website = safeWebsite(entry.website);
+    const sourceUrl = safeWebsite(entry.sourceUrl);
+    if (
+      !point ||
+      !name ||
+      !website ||
+      !sourceUrl ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.slug) ||
+      entry.slug.length > 80
+    )
+      continue;
+    const distance = distanceKm(center, point);
+    if (distance > radiusKm) continue;
+    const osmId =
+      entry.osmId &&
+      /^(node|way|relation)\/[1-9]\d*$/.test(entry.osmId) &&
+      Number.isSafeInteger(Number(entry.osmId.split("/")[1]))
+        ? entry.osmId
+        : null;
+    shops.push({
+      id: osmId || `directory/${entry.slug}`,
+      name,
+      ...point,
+      address: text(entry.address, 500) || null,
+      website,
+      sourceUrl,
+      sourceLabel: "Verified retailer",
+      phone: null,
+      openingHours: null,
+      osmUrl: osmId ? `https://www.openstreetmap.org/${osmId}` : null,
+      distanceKm: Math.round(distance * 100) / 100,
+    });
+  }
+  return shops;
+}
+
+const comparableShopName = (name: string) =>
+  name
+    .toLocaleLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "and")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+
+export function mergeShopSources(
+  mapShops: readonly RecordShop[],
+  verifiedShops: readonly RecordShop[],
+): { shops: RecordShop[]; limited: boolean; directoryCount: number } {
+  const shops = mapShops.map((shop) => ({ ...shop }));
+  const matchedDirectoryIds = new Set<string>();
+  for (const shop of verifiedShops) {
+    const existing = shops.find(
+      (candidate) =>
+        candidate.id === shop.id ||
+        (comparableShopName(candidate.name) === comparableShopName(shop.name) &&
+          distanceKm(candidate, shop) <= 0.15),
+    );
+    if (existing) {
+      // The reviewed manifest fixes identity across map success and outages.
+      // Existing mapped shops declare osmId; genuinely unmapped shops keep
+      // directory IDs even if the map later discovers an equivalent listing.
+      existing.id = shop.id;
+      existing.address ||= shop.address;
+      existing.website ||= shop.website;
+      existing.sourceUrl = shop.sourceUrl;
+      existing.sourceLabel = shop.sourceLabel;
+      matchedDirectoryIds.add(existing.id);
+    } else {
+      shops.push({ ...shop });
+      matchedDirectoryIds.add(shop.id);
+    }
+  }
+  shops.sort(
+    (a, b) => a.distanceKm - b.distanceKm || a.name.localeCompare(b.name),
+  );
+  const visible = shops.slice(0, 200);
+  return {
+    shops: visible,
+    limited: shops.length > 200,
+    directoryCount: visible.filter((shop) => matchedDirectoryIds.has(shop.id))
+      .length,
+  };
+}
+
 export async function findNearbyShops(
   input: z.infer<typeof nearbySchema>,
 ): Promise<NearbyShops> {
@@ -523,16 +655,88 @@ export async function findNearbyShops(
   url.searchParams.set("limit", "100");
   url.searchParams.set("include", "osm.shop.music,osm.shop.musical_instrument");
   url.searchParams.set("lang", "en");
-  const key = `nearby:vinyl-v2:${hash(`${url.href}:${center.latitude}:${center.longitude}:${parsed.radiusKm}`)}`;
-  return cached(key, 6 * 3600, async () => {
-    const candidates = await providerJson(url);
-    const details = await currentShopDetails(candidates);
-    const result = normalizeShops(candidates, center, parsed.radiusKm, details);
-    return {
-      center,
-      radiusKm: parsed.radiusKm,
-      ...result,
+  const verified = directoryShops(center, parsed.radiusKm);
+  const mappedDirectory = verified.filter(
+    (shop) => !shop.id.startsWith("directory/"),
+  );
+  const key = `nearby:vinyl-v3:${hash(
+    `${url.href}:${center.latitude}:${center.longitude}:${parsed.radiusKm}:${mappedDirectory
+      .map((shop) => shop.id)
+      .sort()
+      .join(",")}`,
+  )}`;
+  let mapAvailable = true;
+  let mapResult: {
+    shops: RecordShop[];
+    limited: boolean;
+    fetchedAt: string;
+    excludedDirectoryIds: string[];
+  };
+  try {
+    mapResult = await cached(key, 6 * 3600, async () => {
+      const candidates = await providerJson(url);
+      const features = photonFeatures(candidates);
+      const details = await currentShopDetails({
+        type: "FeatureCollection",
+        features: [
+          // Known directory identities are checked even if the geocoder omitted
+          // them. Current closure/rename/no-vinyl tags override older evidence.
+          ...mappedDirectory.map((shop) => ({
+            properties: {
+              osm_type: shop.id.charAt(0).toUpperCase(),
+              osm_id: Number(shop.id.split("/")[1]),
+            },
+          })),
+          ...features,
+        ],
+      });
+      const excludedDirectoryIds = mappedDirectory
+        .filter((shop) => {
+          const current = details[shop.id];
+          return (
+            !current ||
+            !current.visible ||
+            comparableShopName(
+              text(current.tags.name) || text(current.tags["name:en"]),
+            ) !== comparableShopName(shop.name) ||
+            (current.point && distanceKm(current.point, shop) > 0.15) ||
+            !hasVinylSalesEvidence(shop.id, shop.name, current.point || shop, {
+              ...current.tags,
+              "sells:records": current.tags["sells:records"] ?? "yes",
+            })
+          );
+        })
+        .map((shop) => shop.id);
+      return {
+        ...normalizeShops(candidates, center, parsed.radiusKm, details),
+        excludedDirectoryIds,
+        fetchedAt: new Date().toISOString(),
+      };
+    });
+  } catch (error) {
+    if (!verified.some((shop) => shop.id.startsWith("directory/"))) throw error;
+    mapAvailable = false;
+    mapResult = {
+      shops: [],
+      limited: false,
+      // A known mapped shop needs current map evidence; don't resurrect a
+      // closed/no-vinyl entry using an older directory fact during an outage.
+      excludedDirectoryIds: mappedDirectory.map((shop) => shop.id),
       fetchedAt: new Date().toISOString(),
     };
-  });
+  }
+  const merged = mergeShopSources(
+    mapResult.shops,
+    verified.filter(
+      (shop) => !mapResult.excludedDirectoryIds.includes(shop.id),
+    ),
+  );
+  return {
+    center,
+    radiusKm: parsed.radiusKm,
+    shops: merged.shops,
+    limited: mapResult.limited || merged.limited,
+    fetchedAt: mapResult.fetchedAt,
+    discovery: { mapAvailable, directoryCount: merged.directoryCount },
+  };
 }

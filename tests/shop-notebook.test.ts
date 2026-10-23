@@ -82,6 +82,7 @@ describe("private shop notebook", () => {
       "0002_integrations.sql",
       "0005_shop_discovery.sql",
       "0006_shop_notebook.sql",
+      "0007_shop_directory.sql",
     ])
       await state.db.exec(
         await readFile(
@@ -189,6 +190,32 @@ describe("private shop notebook", () => {
       new Request("https://wax.example.test/api/shops/notebook?ownerId=bob"),
     );
     expect((await disguisedRead.json()).shops).toEqual([alice]);
+  });
+
+  it("persists private directory-shop notes without changing existing OSM identities", async () => {
+    const osm = await save();
+    const input = {
+      ...initial,
+      shop: { ...initial.shop, id: "directory/spoonful-records-columbus" },
+    };
+    const directory = await save(input);
+    expect((await read()).shops).toEqual([directory, osm]);
+    state.collector.mockResolvedValue({ id: "bob" });
+    expect((await read()).shops).toEqual([]);
+    expect((await PUT(request("PUT", { ...input, version: 1 }))).status).toBe(
+      404,
+    );
+    const own = await save({ ...input, rating: 2 });
+    expect(own.shop.id).toBe(directory.shop.id);
+    state.collector.mockResolvedValue({ id: "alice" });
+    expect(
+      (
+        await DELETE(
+          request("DELETE", { shopId: directory.shop.id, version: 1 }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await read()).shops).toEqual([osm]);
   });
 
   it("can clear rating and staff, and removes only the caller's saved shop", async () => {
@@ -299,9 +326,19 @@ describe("private shop notebook", () => {
       "node/9007199254740992",
       "node/1?x=2",
       "user/1",
+      "directory/",
+      "directory/../shop",
+      "directory/Shop",
+      "directory/shop--name",
+      "directory/" + "x".repeat(81),
     ])
       expect(notebookShopIdSchema.safeParse(id).success).toBe(false);
-    for (const id of ["node/1", "way/123", "relation/9007199254740991"])
+    for (const id of [
+      "node/1",
+      "way/123",
+      "relation/9007199254740991",
+      "directory/spoonful-records-columbus",
+    ])
       expect(notebookShopIdSchema.safeParse(id).success).toBe(true);
     for (const patch of [
       { name: "" },

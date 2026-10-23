@@ -28,6 +28,7 @@ import {
   SuccessNotice,
 } from "./ui";
 import { CandidateFields, CopyForm } from "./record-form";
+import styles from "./record-detail.module.css";
 
 export function RecordDetail({ id }: { id: string }) {
   const { data, refresh } = useLibrary();
@@ -53,6 +54,7 @@ export function RecordDetail({ id }: { id: string }) {
         artist,
         title,
         year,
+        originalYear,
         genres,
         label,
         catalogNumber,
@@ -82,6 +84,7 @@ export function RecordDetail({ id }: { id: string }) {
             artist,
             title,
             year,
+            originalYear: originalYear ?? null,
             genres: genres.filter(Boolean),
             label,
             catalogNumber,
@@ -306,30 +309,34 @@ export function RecordDetail({ id }: { id: string }) {
           <div className="record-detail">
             <aside className="detail-art">
               <Cover record={record} />
-              <div className="detail-art-actions">
-                <Button
-                  onClick={() => {
-                    setSpinOpen(true);
-                    setError("");
-                  }}
+              <div className={styles.actionPanel}>
+                <div className="detail-art-actions">
+                  <Button
+                    onClick={() => {
+                      setSpinOpen(true);
+                      setError("");
+                    }}
+                  >
+                    <Disc3 size={17} /> Log a spin
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    busy={busy === "qr"}
+                    onClick={() => void makeQr()}
+                  >
+                    <QrCode size={16} /> QR label
+                  </Button>
+                </div>
+                <Link
+                  className={`button button-secondary ${styles.exploreLink}`}
+                  href={`/records/${record.id}/explore`}
                 >
-                  <Disc3 size={17} /> Log a spin
-                </Button>
-                <Button
-                  variant="secondary"
-                  busy={busy === "qr"}
-                  onClick={() => void makeQr()}
-                >
-                  <QrCode size={16} /> QR label
-                </Button>
+                  <GitBranch size={16} /> Artist Tree
+                </Link>
+                <div className={styles.attribution}>
+                  <SourceCredit sourceUrl={record.sourceUrl} />
+                </div>
               </div>
-              <SourceCredit sourceUrl={record.sourceUrl} />
-              <Link
-                className="button button-secondary"
-                href={`/records/${record.id}/explore`}
-              >
-                <GitBranch size={16} /> Artist Tree
-              </Link>
               {record.photoIds.length > 0 && (
                 <div className="detail-photos">
                   {record.photoIds.map((photo) => (
@@ -372,7 +379,8 @@ export function RecordDetail({ id }: { id: string }) {
               </div>
               <dl className="detail-facts">
                 {[
-                  ["Year", record.year || "Unknown"],
+                  ["Originally released", record.originalYear ?? "Unknown"],
+                  ...(record.year ? [["Pressing year", record.year]] : []),
                   ["Label", record.label || "Not recorded"],
                   ["Catalog no.", record.catalogNumber || "Not recorded"],
                   ["Country", record.country || "Not recorded"],

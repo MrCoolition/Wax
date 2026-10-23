@@ -1,4 +1,4 @@
-export const SHOP_RADII_KM = [10, 25, 50] as const;
+export const SHOP_RADII_KM = [10, 25, 50, 100] as const;
 export type ShopRadiusKm = (typeof SHOP_RADII_KM)[number];
 
 export interface ShopArea {
@@ -19,7 +19,9 @@ export interface RecordShop extends ShopArea {
   website: string | null;
   phone: string | null;
   openingHours: string | null;
-  osmUrl: string;
+  osmUrl: string | null;
+  sourceUrl?: string;
+  sourceLabel?: string;
 }
 
 export interface NearbyShops {
@@ -28,6 +30,10 @@ export interface NearbyShops {
   shops: RecordShop[];
   fetchedAt: string;
   limited: boolean;
+  discovery?: {
+    mapAvailable: boolean;
+    directoryCount: number;
+  };
 }
 
 /** Approximate area only: precise device coordinates never leave the browser. */

@@ -68,7 +68,7 @@ test("invited collector adds a copy, reloads Neon data, and stays private", asyn
   await page.getByRole("button", { name: "Enter the details" }).click();
   await page.getByLabel("Artist", { exact: true }).fill("Curtis Mayfield");
   await page.getByLabel("Record title").fill("Super Fly");
-  await page.getByLabel("Release year").fill("1972");
+  await page.getByLabel("Album release year", { exact: false }).fill("1972");
   await page.getByLabel("Your liner notes").fill("Private QA note");
   await page.getByLabel("Purchase price").fill("18.50");
   await page.getByRole("button", { name: "Add to my collection" }).click();
@@ -85,6 +85,8 @@ test("invited collector adds a copy, reloads Neon data, and stays private", asyn
   expect(library.records[0]).toMatchObject({
     artist: "Curtis Mayfield",
     title: "Super Fly",
+    originalYear: 1972,
+    year: null,
     notes: "Private QA note",
     purchasePrice: "18.50",
   });
