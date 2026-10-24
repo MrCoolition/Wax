@@ -3,16 +3,17 @@ import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
   ArrowUp,
+  ArrowUpRight,
   Check,
   Disc3,
-  Headphones,
-  MapPin,
+  Compass,
   Sparkles,
   X,
 } from "lucide-react";
 import type { WizardReply } from "@/lib/contracts";
 import { api, useLibrary } from "./library-provider";
 import { Button, Cover, ErrorNotice, PageHeader, Vinyl } from "./ui";
+import styles from "./wizard-view.module.css";
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -47,7 +48,7 @@ export function WizardView() {
         { role: "user", content: question },
         { role: "assistant", content: reply.reply, reply },
       ]);
-      setMessage("");
+      setMessage((current) => (current.trim() === question ? "" : current));
     } catch (err) {
       setError(
         err instanceof Error
@@ -88,14 +89,24 @@ export function WizardView() {
     }
   }
   const prompts = [
+    {
+      text: "Which Michael Jackson album should I buy first, and why?",
+      icon: Compass,
+    },
+    {
+      text: "Who played on Aja, and what else should I hear them on?",
+      icon: Sparkles,
+    },
+    {
+      text: "How do I identify a great pressing of the White Album?",
+      icon: Disc3,
+    },
     { text: "Find me something I’ve overlooked.", icon: Disc3 },
-    { text: "What should I spin tonight?", icon: Headphones },
-    { text: "Which records still need a shelf location?", icon: MapPin },
   ];
   return (
     <>
       <PageHeader
-        eyebrow="YOUR COLLECTION. A LITTLE EXTRA SOUL."
+        eyebrow="MUSIC OBSESSED. VINYL TO THE CORE."
         title="Wax Wizard"
         description="A second set of ears for your first love."
       />
@@ -107,9 +118,8 @@ export function WizardView() {
             LET’S DIG A LITTLE DEEPER.
           </h2>
           <p>
-            Ask about your actual collection. Find a forgotten favorite. Sort
-            out the details. Any proposed changes are yours to review before
-            they happen.
+            The players. The sessions. The pressing worth hunting. From your
+            next must-have to the story behind the grooves—let’s get into it.
           </p>
         </div>
         <Vinyl label="WIZ" />
@@ -145,21 +155,97 @@ export function WizardView() {
               )}
             </div>
             <p>{item.content}</p>
+            {!!item.reply?.sources?.length && (
+              <nav
+                className={styles.sources}
+                aria-label="Sources checked for this answer"
+              >
+                <span>LINER NOTES / SOURCES CHECKED</span>
+                {item.reply.sources.map((source) => (
+                  <a
+                    key={source.id}
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {source.title} <ArrowUpRight size={12} />
+                  </a>
+                ))}
+              </nav>
+            )}
+            {!!item.reply?.recommendations?.length && (
+              <section
+                className={styles.discovery}
+                aria-label="Albums to explore"
+              >
+                <div className={styles.divider}>
+                  <Compass size={15} /> YOUR NEXT DIG
+                </div>
+                <div className={styles.cards}>
+                  {item.reply.recommendations.map((album, albumIndex) => (
+                    <article className={styles.card} key={album.masterId}>
+                      <div className={styles.sleeve}>
+                        <Cover
+                          record={{
+                            artist: album.artist,
+                            title: album.title,
+                            coverUrl: album.coverUrl,
+                          }}
+                        />
+                        <span className={styles.number}>
+                          {String(albumIndex + 1).padStart(2, "0")}
+                        </span>
+                      </div>
+                      <div className={styles.details}>
+                        <span className="eyebrow">
+                          {albumIndex === 0 ? "START HERE" : "KEEP DIGGING"}
+                        </span>
+                        <h3>{album.title}</h3>
+                        <p className={styles.artist}>
+                          {album.artist}
+                          {album.originalYear ? ` · ${album.originalYear}` : ""}
+                        </p>
+                        <p className={styles.reason}>{album.reason}</p>
+                        <Link
+                          className="button button-secondary"
+                          href={`/add?${new URLSearchParams({ artist: album.artist, title: album.title, master: String(album.masterId) })}`}
+                        >
+                          Explore pressings <ArrowUpRight size={16} />
+                        </Link>
+                        <a
+                          className={styles.credit}
+                          href={album.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Discogs album details ↗
+                        </a>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
             {item.reply?.recordIds.length ? (
-              <div className="wizard-records">
-                {item.reply.recordIds.map((id) => {
-                  const record = data!.records.find((r) => r.id === id);
-                  return record ? (
-                    <Link key={id} href={"/records/" + id}>
-                      <Cover record={record} />
-                      <span>
-                        <strong>{record.title}</strong>
-                        <small>{record.artist}</small>
-                      </span>
-                    </Link>
-                  ) : null;
-                })}
-              </div>
+              <section aria-label="From your collection">
+                <div className={styles.divider}>
+                  <Disc3 size={15} /> FROM YOUR COLLECTION
+                </div>
+                <div className="wizard-records">
+                  {item.reply.recordIds.map((id) => {
+                    const record = data!.records.find((r) => r.id === id);
+                    return record ? (
+                      <Link key={id} href={"/records/" + id}>
+                        <Cover record={record} />
+                        <span>
+                          <strong>{record.title}</strong>
+                          <small>{record.artist}</small>
+                        </span>
+                      </Link>
+                    ) : null;
+                  })}
+                </div>
+              </section>
             ) : null}
             {item.reply?.proposal && (
               <div className="proposal-box">
@@ -228,6 +314,11 @@ export function WizardView() {
           </article>
         ))}
       </section>
+      {busy === "chat" && (
+        <p className={styles.thinking} role="status">
+          <Sparkles size={16} /> Digging into your question…
+        </p>
+      )}
       <ErrorNotice>{error}</ErrorNotice>
       <div className="wizard-composer">
         <form onSubmit={ask}>
@@ -240,8 +331,8 @@ export function WizardView() {
             required
             placeholder={
               data!.records.length
-                ? "Ask about your records, or find your next spin…"
-                : "Ask the Wizard where to start with your collection…"
+                ? "What should I buy next? Who played on this? What should I spin?"
+                : "Name an artist you love. Let’s find your first great record."
             }
             rows={2}
             onKeyDown={(e) => {
@@ -265,8 +356,8 @@ export function WizardView() {
           </Button>
         </form>
         <p>
-          Grounded in your collection. Suggested edits always need your
-          approval.
+          Discover beyond your shelf. Catalog matches to explore. Collection
+          edits always need your approval.
         </p>
       </div>
     </>

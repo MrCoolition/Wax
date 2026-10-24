@@ -479,7 +479,7 @@ describe("authenticated lazy Artist Tree API", () => {
         "SELECT cache_key,payload FROM wax.catalog_cache",
       )
     ).rows;
-    expect(cache[0].cache_key).toBe("explorer:v1:release:2825456");
+    expect(cache[0].cache_key).toBe("explorer:v2:release:2825456");
     expect(JSON.stringify(cache)).not.toContain("PRIVATE NOTES");
     expect(state.fetch.mock.calls[0][0]).toBe(
       "https://api.discogs.com/releases/2825456",

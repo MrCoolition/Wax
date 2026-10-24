@@ -189,6 +189,7 @@ describe("Discogs release freshness", () => {
     state.fetch.mockImplementation(async (url: string) => {
       if (url.includes("/database/search"))
         return Response.json({
+          pagination: { page: 1, pages: 1, items: 1 },
           results: [
             { id: 42, title: "Artist - Album", year: 2024, master_id: 100 },
           ],

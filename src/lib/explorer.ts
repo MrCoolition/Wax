@@ -35,6 +35,15 @@ export interface ExplorerRelease {
   tracks: ExplorerTrack[];
   releaseCredits: ExplorerCredit[];
   unresolvedCredits: ExplorerCredit[];
+  /** Provider-reported pressing identifiers, never inferred from artwork. */
+  identifiers?: { type: string; value: string; description: string }[];
+  companies?: {
+    id: number | null;
+    name: string;
+    role: string;
+    catalogNumber: string;
+  }[];
+  notes?: string;
 }
 export interface ExplorerRelation {
   id: number;

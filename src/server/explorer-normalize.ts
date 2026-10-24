@@ -287,6 +287,27 @@ export function normalizeExplorerRelease(
     tracks,
     releaseCredits,
     unresolvedCredits,
+    identifiers: (Array.isArray(raw.identifiers)
+      ? raw.identifiers.slice(0, 200)
+      : []
+    )
+      .map(object)
+      .map((entry) => ({
+        type: text(entry.type, 100),
+        value: text(entry.value, 500),
+        description: text(entry.description, 300),
+      }))
+      .filter((entry) => entry.type && entry.value),
+    companies: (Array.isArray(raw.companies) ? raw.companies.slice(0, 200) : [])
+      .map(object)
+      .map((entry) => ({
+        id: positiveId(entry.id),
+        name: text(entry.name, 200),
+        role: text(entry.entity_type_name, 100),
+        catalogNumber: text(entry.catno, 100),
+      }))
+      .filter((entry) => entry.name),
+    notes: plainDiscogsProfile(raw.notes).slice(0, 4000),
   };
 }
 

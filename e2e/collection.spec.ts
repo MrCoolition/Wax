@@ -199,6 +199,13 @@ test("camera denial and upload or AI failures preserve a recoverable photo draft
     page.getByText("Recognition unavailable. Your photo is saved; retry."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Identify this record" }).click();
+  await expect(page.getByLabel("Search artist", { exact: true })).toHaveValue(
+    "Curtis Mayfield",
+  );
+  await page
+    .getByRole("region", { name: "Find your pressing." })
+    .getByRole("button", { name: "Add by hand", exact: true })
+    .click();
   await expect(page.getByLabel("Artist", { exact: true })).toHaveValue(
     "Curtis Mayfield",
   );
@@ -215,6 +222,10 @@ test("catalog and barcode candidates retain a manual path when throttled", async
     .getByLabel("Search the record catalog")
     .fill("Curtis Mayfield Super Fly");
   await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page
+    .getByRole("button", { name: "See pressings", exact: true })
+    .first()
+    .click();
   await expect(
     page.getByRole("button", { name: "Review this pressing" }).first(),
   ).toBeVisible();

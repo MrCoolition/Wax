@@ -1,23 +1,57 @@
 import { z } from "zod";
 import type { CatalogCandidate } from "../lib/contracts";
+import type {
+  AlbumSearchResult,
+  CatalogAlbum,
+  CatalogPage,
+  PressingSearchResult,
+} from "../lib/catalog-search";
 import { getPool } from "./db";
 import { HttpError } from "./http";
 
 const optionalQuery = z.string().trim().max(200).optional();
-export const catalogSearchSchema = z.object({
-  query: optionalQuery,
-  artist: optionalQuery,
-  title: optionalQuery,
-  catalogNumber: optionalQuery,
-  barcode: z
-    .string()
-    .trim()
-    .max(40)
-    .regex(/^[0-9 -]*$/)
-    .optional(),
-  page: z.coerce.number().int().min(1).max(100).optional(),
-});
+const pageInput = z.coerce.number().int().min(1).max(100).optional();
+const pressingFilters = {
+  country: optionalQuery,
+  label: optionalQuery,
+  year: z.coerce.number().int().min(1850).max(2200).optional(),
+};
+export const catalogSearchSchema = z
+  .object({
+    query: optionalQuery,
+    artist: optionalQuery,
+    title: optionalQuery,
+    catalogNumber: optionalQuery,
+    barcode: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(/^[0-9 -]*$/)
+      .optional(),
+    ...pressingFilters,
+    page: pageInput,
+  })
+  .strict();
 export type CatalogSearch = z.infer<typeof catalogSearchSchema>;
+export const albumSearchSchema = z
+  .object({
+    query: optionalQuery,
+    artist: optionalQuery,
+    title: optionalQuery,
+    page: pageInput,
+  })
+  .strict();
+export const albumVersionsSchema = z
+  .object({
+    ...pressingFilters,
+    page: pageInput,
+  })
+  .strict();
+export const catalogIdSchema = z
+  .string()
+  .regex(/^[1-9]\d{0,15}$/)
+  .transform(Number)
+  .pipe(z.number().int().positive().max(Number.MAX_SAFE_INTEGER));
 export const releaseQuerySchema = z
   .object({ refresh: z.enum(["true", "false"]).optional() })
   .strict();
@@ -276,9 +310,234 @@ async function fetchMasterYear(
   }
 }
 
-export async function searchCatalog(
+const emptyPagination = (page = 1): CatalogPage => ({
+  page,
+  pages: 1,
+  total: 0,
+  hasMore: false,
+});
+function catalogPagination(value: unknown, expectedPage: number): CatalogPage {
+  const raw = object(value);
+  const page = Number(raw.page);
+  const pages = Number(raw.pages);
+  const total = Number(raw.items);
+  if (
+    page !== expectedPage ||
+    !Number.isSafeInteger(pages) ||
+    pages < 0 ||
+    !Number.isSafeInteger(total) ||
+    total < 0
+  )
+    throw new HttpError(
+      502,
+      "Discogs returned incomplete search results. Please try again.",
+    );
+  const boundedPages = Math.max(1, Math.min(100, pages));
+  return { page, pages: boundedPages, total, hasMore: page < boundedPages };
+}
+const pendingDiscovery = new Map<string, Promise<unknown>>();
+async function cachedDiscovery<T>(
+  key: string,
+  fetchValue: () => Promise<T>,
+): Promise<T> {
+  const existing = pendingDiscovery.get(key);
+  if (existing) return existing as Promise<T>;
+  const pending = cached(key, fetchValue);
+  pendingDiscovery.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (pendingDiscovery.get(key) === pending) pendingDiscovery.delete(key);
+  }
+}
+const normalizedWords = (value: string | undefined) =>
+  (value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+/** This documented album nickname is specific to the Beatles, not every White Album.
+ * Canonical source: https://www.discogs.com/master/46402-The-Beatles-The-Beatles
+ * Artist's own nickname reference: https://www.thebeatles.com/22-november-1968-white-album-released
+ */
+export function isBeatlesWhiteAlbum(input: {
+  query?: string;
+  artist?: string;
+  title?: string;
+}): boolean {
+  const artist = normalizedWords(input.artist);
+  const title = normalizedWords(input.title);
+  if (artist || title)
+    return (
+      /^(the )?beatles$/.test(artist) &&
+      /^(the )?white album$/.test(title) &&
+      (!input.query ||
+        /^(the )?beatles (the )?white album$/.test(
+          normalizedWords(input.query),
+        ))
+    );
+  return /^(the )?beatles (the )?white album$/.test(
+    normalizedWords(input.query),
+  );
+}
+const WHITE_ALBUM_NOTICE =
+  "“The White Album” is The Beatles’ 1968 self-titled album. Choose your vinyl pressing next.";
+
+function normalizeAlbumSearch(value: unknown): CatalogAlbum {
+  const candidate = normalizeSearchCandidate(value);
+  return {
+    masterId: candidate.discogsId!,
+    artist: candidate.artist,
+    title: candidate.title,
+    originalYear: candidate.year,
+    coverUrl: candidate.coverUrl,
+    sourceUrl: `https://www.discogs.com/master/${candidate.discogsId}`,
+  };
+}
+async function fetchCatalogAlbum(masterId: number): Promise<CatalogAlbum> {
+  z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(masterId);
+  return cachedDiscovery(`album:v1:${masterId}`, async () => {
+    const raw = object(await discogs(`/masters/${masterId}`));
+    const originalYear = normalizeMasterYear(raw, masterId);
+    const metadata = normalizeRelease(raw);
+    return {
+      masterId,
+      artist: metadata.artist,
+      title: metadata.title,
+      originalYear,
+      coverUrl: metadata.coverUrl,
+      sourceUrl: `https://www.discogs.com/master/${masterId}`,
+    };
+  });
+}
+
+export async function searchAlbums(
+  input: z.infer<typeof albumSearchSchema>,
+): Promise<AlbumSearchResult> {
+  const params = albumSearchSchema.parse(input);
+  const page = params.page || 1;
+  if (![params.query, params.artist, params.title].some(Boolean))
+    return { albums: [], pagination: emptyPagination(page) };
+  if (isBeatlesWhiteAlbum(params)) {
+    const album = await fetchCatalogAlbum(46402);
+    if (
+      album.artist !== "The Beatles" ||
+      album.title !== "The Beatles" ||
+      album.originalYear !== 1968
+    )
+      throw new HttpError(
+        502,
+        "The album listing changed. Try searching by artist and title.",
+      );
+    return {
+      albums: page === 1 ? [album] : [],
+      pagination: { page, pages: 1, total: 1, hasMore: false },
+      notice: WHITE_ALBUM_NOTICE,
+    };
+  }
+  const query = new URLSearchParams({
+    type: "master",
+    format: "Vinyl",
+    per_page: "20",
+    page: String(page),
+  });
+  for (const [key, value] of [
+    ["q", params.query],
+    ["artist", params.artist],
+    ["release_title", params.title],
+  ])
+    if (key && value) query.set(key, value);
+  return cachedDiscovery(`album-search:v1:${query}`, async () => {
+    const raw = object(await discogs(`/database/search?${query}`));
+    const seen = new Set<number>();
+    const albums = array(raw.results)
+      .slice(0, 20)
+      .filter((value) => object(value).type === "master")
+      .map(normalizeAlbumSearch)
+      .filter((album) => {
+        if (seen.has(album.masterId)) return false;
+        seen.add(album.masterId);
+        return true;
+      });
+    return {
+      albums,
+      pagination: catalogPagination(raw.pagination, page),
+      ...(Number(object(raw.pagination).pages) > 100
+        ? {
+            notice:
+              "Showing the first 100 pages. Narrow the artist or title to find more specific matches.",
+          }
+        : {}),
+    };
+  });
+}
+
+export async function fetchAlbumVersions(
+  masterId: number,
+  input: z.infer<typeof albumVersionsSchema> = {},
+): Promise<PressingSearchResult> {
+  z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(masterId);
+  const params = albumVersionsSchema.parse(input);
+  const page = params.page || 1;
+  const query = new URLSearchParams({
+    format: "Vinyl",
+    per_page: "20",
+    page: String(page),
+  });
+  for (const [key, value] of [
+    ["country", params.country],
+    ["label", params.label],
+    ["released", params.year?.toString()],
+  ])
+    if (key && value) query.set(key, value);
+  return cachedDiscovery(`album-versions:v1:${masterId}:${query}`, async () => {
+    // Album metadata gives a reliable artist and original year. Never fetch every pressing.
+    const album = await fetchCatalogAlbum(masterId);
+    const raw = object(await discogs(`/masters/${masterId}/versions?${query}`));
+    const seen = new Set<number>();
+    const candidates: CatalogCandidate[] = array(raw.versions)
+      .slice(0, 20)
+      .map(object)
+      .filter((version) => texts(version.major_formats).includes("Vinyl"))
+      .map((version) => {
+        const releaseId = id(version.id);
+        return {
+          discogsId: releaseId,
+          artist: album.artist,
+          title: text(version.title) || album.title,
+          year: year(version.released),
+          originalYear: album.originalYear,
+          genres: [],
+          label: text(version.label),
+          catalogNumber: text(version.catno),
+          country: text(version.country),
+          format: ["Vinyl", text(version.format)].filter(Boolean).join(", "),
+          coverUrl: safeDiscogsImage(version.thumb),
+          sourceUrl: `https://www.discogs.com/release/${releaseId}`,
+        };
+      })
+      .filter((candidate) => {
+        if (seen.has(candidate.discogsId!)) return false;
+        seen.add(candidate.discogsId!);
+        return true;
+      });
+    return {
+      candidates,
+      pagination: catalogPagination(raw.pagination, page),
+      ...(Number(object(raw.pagination).pages) > 100
+        ? {
+            notice:
+              "Showing the first 100 pages. Narrow the country, label or pressing year to find more specific matches.",
+          }
+        : {}),
+    };
+  });
+}
+
+export async function searchCatalogPage(
   input: CatalogSearch,
-): Promise<CatalogCandidate[]> {
+): Promise<PressingSearchResult> {
   const params = catalogSearchSchema.parse(input);
   if (
     ![
@@ -289,7 +548,19 @@ export async function searchCatalog(
       params.barcode,
     ].some(Boolean)
   )
-    return [];
+    return { candidates: [], pagination: emptyPagination(params.page || 1) };
+  if (isBeatlesWhiteAlbum(params) && !params.catalogNumber && !params.barcode) {
+    const results = await fetchAlbumVersions(46402, {
+      country: params.country,
+      label: params.label,
+      year: params.year,
+      page: params.page,
+    });
+    return { ...results, notice: WHITE_ALBUM_NOTICE };
+  }
+  // A catalog number or barcode still belongs in exact release search. Apply
+  // the same narrow nickname correction without discarding those identifiers.
+  const alias = isBeatlesWhiteAlbum(params);
   const query = new URLSearchParams({
     type: "release",
     format: "Vinyl",
@@ -297,18 +568,40 @@ export async function searchCatalog(
     page: String(params.page || 1),
   });
   for (const [key, value] of [
-    ["q", params.query],
-    ["artist", params.artist],
-    ["release_title", params.title],
+    ["q", alias ? undefined : params.query],
+    ["artist", alias ? "The Beatles" : params.artist],
+    ["release_title", alias ? "The Beatles" : params.title],
     ["catno", params.catalogNumber],
     ["barcode", params.barcode?.replace(/[ -]/g, "")],
+    ["country", params.country],
+    ["label", params.label],
+    ["year", params.year?.toString()],
   ]) {
     if (key && value) query.set(key, value);
   }
-  return cached(`search:${query}`, async () => {
+  return cachedDiscovery(`search:v2:${query}`, async () => {
     const response = object(await discogs(`/database/search?${query}`));
-    return array(response.results).slice(0, 20).map(normalizeSearchCandidate);
+    return {
+      candidates: array(response.results)
+        .slice(0, 20)
+        .map(normalizeSearchCandidate),
+      pagination: catalogPagination(response.pagination, params.page || 1),
+      ...(alias ? { notice: WHITE_ALBUM_NOTICE } : {}),
+      ...(Number(object(response.pagination).pages) > 100
+        ? {
+            notice:
+              "Showing the first 100 pages. Add pressing details to narrow the results.",
+          }
+        : {}),
+    };
   });
+}
+
+/** Compatibility wrapper for photo recognition and collection explorer callers. */
+export async function searchCatalog(
+  input: CatalogSearch,
+): Promise<CatalogCandidate[]> {
+  return (await searchCatalogPage(input)).candidates;
 }
 
 async function releaseResult(
