@@ -1,3 +1,5 @@
+import type { WizardCatalogSource } from "./wizard";
+
 export type Condition =
   "M" | "NM" | "VG+" | "VG" | "G+" | "G" | "F" | "P" | "Not graded";
 export type Intent = "keep" | "trade" | "sell";
@@ -129,6 +131,16 @@ export interface WizardChange {
 export interface WizardReply {
   reply: string;
   recordIds: string[];
+  sources?: WizardCatalogSource[];
+  recommendations?: {
+    masterId: number;
+    artist: string;
+    title: string;
+    originalYear: number | null;
+    coverUrl: string | null;
+    sourceUrl: string;
+    reason: string;
+  }[];
   proposal: { id: string; summary: string; changes: WizardChange[] } | null;
 }
 export interface ApiFailure {

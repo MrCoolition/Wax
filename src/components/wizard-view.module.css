@@ -1,0 +1,130 @@
+.discovery {
+  margin-top: 25px;
+}
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 18px;
+}
+.card {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-content: start;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--orange);
+  background: var(--paper);
+}
+.card:nth-child(2) {
+  border-top-color: var(--mustard);
+}
+.card:nth-child(3) {
+  border-top-color: var(--ink);
+}
+.sleeve {
+  position: relative;
+}
+.sleeve :global(.cover),
+.sleeve :global(.cover-fallback) {
+  width: 100%;
+  aspect-ratio: 1;
+}
+.sleeve :global(.cover-fallback strong),
+.sleeve :global(.cover-fallback span) {
+  display: none;
+}
+.number {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  padding: 3px 6px;
+  background: var(--ink);
+  color: var(--cream);
+  font-size: 11px;
+  font-weight: 700;
+}
+.details {
+  min-width: 0;
+}
+.details h3 {
+  font-size: 27px;
+  line-height: 1.1;
+  margin: 8px 0 6px;
+  overflow-wrap: anywhere;
+}
+.artist {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+.reason {
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 16px 0;
+}
+.details :global(.button) {
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: 12px;
+  gap: 8px;
+}
+.credit {
+  display: block;
+  width: fit-content;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  text-underline-offset: 3px;
+}
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 20px 0;
+  font-size: 13px;
+  color: var(--orange);
+}
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 16px;
+  font-size: 11px;
+}
+.sources > span {
+  width: 100%;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+.sources a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .card {
+    padding: 18px;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 14px;
+  }
+  .details h3 {
+    font-size: 24px;
+  }
+}

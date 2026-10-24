@@ -14,6 +14,7 @@ import {
   Check,
   RefreshCw,
   GitBranch,
+  Search,
 } from "lucide-react";
 import type { CatalogCandidate, CopyFields, RecordCopy } from "@/lib/contracts";
 import { api, useLibrary } from "./library-provider";
@@ -28,6 +29,7 @@ import {
   SuccessNotice,
 } from "./ui";
 import { CandidateFields, CopyForm } from "./record-form";
+import { CatalogFinderDialog } from "./catalog-finder";
 import styles from "./record-detail.module.css";
 
 export function RecordDetail({ id }: { id: string }) {
@@ -36,6 +38,8 @@ export function RecordDetail({ id }: { id: string }) {
   const record = data?.records.find((item) => item.id === id);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<RecordCopy | null>(null);
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [catalogNotice, setCatalogNotice] = useState("");
   const [removing, setRemoving] = useState(false);
   const [qr, setQr] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
@@ -245,6 +249,18 @@ export function RecordDetail({ id }: { id: string }) {
               <div className="section-title">
                 <span>01 / SAVED COLLECTION DETAILS</span>
               </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setFinderOpen(true)}
+              >
+                <Search size={16} /> Find catalog matches
+              </Button>
+              <p className="small-note" style={{ margin: "12px 0 20px" }}>
+                Find the album, then narrow down your pressing. Review the
+                details before saving.
+              </p>
+              <SuccessNotice>{catalogNotice}</SuccessNotice>
               <CandidateFields
                 value={draft}
                 onChange={(candidate) => setDraft({ ...draft, ...candidate })}
@@ -443,6 +459,7 @@ export function RecordDetail({ id }: { id: string }) {
                     setEditing(true);
                     setError("");
                     setSuccess("");
+                    setCatalogNotice("");
                   }}
                 >
                   <Pencil size={15} /> Edit this copy
@@ -495,6 +512,35 @@ export function RecordDetail({ id }: { id: string }) {
             </section>
           )}
         </>
+      )}
+      {editing && draft && (
+        <CatalogFinderDialog
+          open={finderOpen}
+          onOpenChange={setFinderOpen}
+          initialSearch={{
+            mode: "details",
+            artist: draft.artist,
+            title: draft.title,
+          }}
+          autoSearch
+          onSelect={(candidate) => {
+            setDraft((current) =>
+              current
+                ? {
+                    ...current,
+                    ...candidate,
+                    pressingConfirmed:
+                      candidate.discogsId === current.discogsId &&
+                      current.pressingConfirmed,
+                  }
+                : current,
+            );
+            setFinderOpen(false);
+            setCatalogNotice(
+              "Catalog details loaded. Your copy notes and condition are kept. Review the pressing, then save your changes.",
+            );
+          }}
+        />
       )}
       <Modal
         open={removing}

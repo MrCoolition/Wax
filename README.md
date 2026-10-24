@@ -15,6 +15,18 @@ The app uses Next.js App Router, React, TypeScript, Tailwind/Radix, Node.js 24, 
 - **AI:** Vercel AI SDK with the direct OpenAI provider and the existing OpenAI key. The default is `gpt-5.4-mini`. AI Gateway is not required by this implementation.
 - **Photos:** private Vercel Blob storage; authenticated application routes serve uploaded images.
 
+## Finding your next record
+
+**Add some wax** starts with album discovery: type an artist and title together, or use the separate fields. Album results open paginated vinyl pressings with country, label, and pressing-year filters. “Beatles White Album” resolves to its catalog title, **The Beatles**, before choosing an edition. Catalog numbers and barcodes still search releases directly. Discogs may match a secondary label even when the result card lists only its primary label.
+
+Hand-entered artist/title fields suggest album matches after a short pause. Selecting a match loads catalog details for review while retaining the physical copy's notes, condition, price, photos, and crates. Photo clues can be corrected through the same finder. Existing manual copies can use **Edit this copy → Find catalog matches**. Nothing is saved or pressing-confirmed automatically; the collector reviews and saves explicitly.
+
+**Wax Wizard** answers buying and discovery questions beyond the collection, including for new collectors with empty libraries. It follows conversation corrections, uses bounded read-only Discogs album lookups, and returns verified album cards with reasons and links into pressing exploration. Only actual owned copies named in the answer or edit proposal appear as collection links. It has no live stock, marketplace prices, or web-search tool; catalog outages still allow general musical advice without invented catalog cards. Suggested collection edits continue to require explicit approval and ownership/version checks.
+
+For deeper music and vinyl questions, five public catalog tools cover albums, vinyl pressings, release/track credits and identifiers, artist connections, and discographies. They share a maximum of six calls per answer. Retrieved source IDs are checked on the server before source links are displayed; the model cannot supply arbitrary URLs. Track-specific, album-level, and unresolved credits remain distinct. Company credits, matrix/runout text, and catalog notes are evidence about a listed edition, not proof of sound quality or a collector's exact pressing. General music knowledge supplies context and opinions; incomplete provider data stays incomplete.
+
+The dedicated `scripts/smoke-catalog-search.mjs` checks real Discogs discovery and persisted manual enrichment in isolated development or preview. `scripts/smoke-wizard-discovery.mjs` additionally tests live AI buying advice, follow-up corrections, owned recommendations, reviewed edits, and musical credits; it requires `WAX_RUN_PAID_SMOKE=1` because it makes five billable model requests. Both create and clean up only disposable test collectors.
+
 ## Run locally
 
 Use Node.js 24 and npm. Create `.env.local` from `.env.example`, set development credentials, then run:

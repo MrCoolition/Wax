@@ -1,6 +1,6 @@
 import { requireCollector } from "@/server/auth";
 import { handleApi } from "@/server/http";
-import { catalogSearchSchema, searchCatalog } from "@/server/catalog";
+import { catalogSearchSchema, searchCatalogPage } from "@/server/catalog";
 import { consumeIntegrationLimit } from "@/server/integration-common";
 
 export const runtime = "nodejs";
@@ -11,6 +11,6 @@ export async function GET(request: Request) {
       Object.fromEntries(new URL(request.url).searchParams),
     );
     await consumeIntegrationLimit(collector.id, "catalog", 120, 60);
-    return { candidates: await searchCatalog(search) };
+    return searchCatalogPage(search);
   });
 }

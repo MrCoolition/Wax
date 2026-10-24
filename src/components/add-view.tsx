@@ -8,7 +8,6 @@ import {
   Check,
   Disc3,
   ImagePlus,
-  LoaderCircle,
   PencilLine,
   ScanLine,
   Search,
@@ -20,6 +19,7 @@ import type {
   PhotoIdentification,
   RecordCopy,
 } from "@/lib/contracts";
+import type { AlbumSearchResult, CatalogAlbum } from "@/lib/catalog-search";
 import { DEFAULT_COPY, EMPTY_CANDIDATE } from "@/lib/contracts";
 import { api, ApiError, useLibrary } from "./library-provider";
 import {
@@ -31,6 +31,13 @@ import {
   SourceCredit,
 } from "./ui";
 import { CandidateFields, CopyForm } from "./record-form";
+import {
+  CatalogFinder,
+  CatalogFinderDialog,
+  ManualCatalogSuggestions,
+  type CatalogSearchDraft,
+} from "./catalog-finder";
+import styles from "./catalog-finder.module.css";
 
 type Mode = "search" | "scan" | "photo" | "manual";
 async function compressImage(file: File): Promise<File> {
@@ -141,24 +148,59 @@ export function AddView() {
       ? (initialMode as Mode)
       : "search",
   );
-  const [query, setQuery] = useState("");
-  const [searchType, setSearchType] = useState("query");
   const [barcode, setBarcode] = useState("");
+  const [scanSearch, setScanSearch] = useState<{
+    value: string;
+    key: number;
+  } | null>(null);
   const [camera, setCamera] = useState(false);
-  const [candidates, setCandidates] = useState<CatalogCandidate[]>([]);
-  const [searched, setSearched] = useState(false);
   const [candidate, setCandidate] = useState<CatalogCandidate | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [manualDraft, setManualDraft] = useState<CatalogCandidate>({
+    ...EMPTY_CANDIDATE,
+  });
   const [copy, setCopy] = useState<CopyFields>({ ...DEFAULT_COPY });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [clue, setClue] = useState("");
   const [photoId, setPhotoId] = useState<string | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState("");
+  const [photoResult, setPhotoResult] = useState<
+    (PhotoIdentification & { revision: number }) | null
+  >(null);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [duplicate, setDuplicate] = useState(false);
   const [crateIds, setCrateIds] = useState<string[]>([]);
+  const [lookup, setLookup] = useState<{
+    search: CatalogSearchDraft;
+    albums?: AlbumSearchResult;
+    album?: CatalogAlbum;
+  } | null>(null);
   const requestKey = useRef<string | null>(null);
+  const photoRequest = useRef<{
+    sequence: number;
+    controller: AbortController | null;
+  }>({ sequence: 0, controller: null });
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const wizardArtist = params.get("artist")?.slice(0, 200) || "";
+  const wizardTitle = params.get("title")?.slice(0, 200) || "";
+  const wizardMaster = Number(params.get("master"));
+  const wizardSearch: CatalogSearchDraft =
+    wizardArtist || wizardTitle
+      ? { mode: "details", artist: wizardArtist, title: wizardTitle }
+      : { mode: "album" };
+  const wizardAlbum: CatalogAlbum | undefined =
+    Number.isSafeInteger(wizardMaster) && wizardMaster > 0
+      ? {
+          masterId: wizardMaster,
+          artist: wizardArtist || "Catalog artist",
+          title: wizardTitle || "Selected album",
+          originalYear: null,
+          coverUrl: null,
+          sourceUrl: `https://www.discogs.com/master/${wizardMaster}`,
+        }
+      : undefined;
+
   useEffect(() => {
     if (!photo) {
       setPhotoPreview("");
@@ -168,96 +210,139 @@ export function AddView() {
     setPhotoPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [photo]);
-  async function search(params: Record<string, string>) {
-    setBusy("search");
-    setError("");
-    setSearched(false);
-    try {
-      const result = await api<{ candidates: CatalogCandidate[] }>(
-        "/api/catalog?" + new URLSearchParams(params),
-      );
-      setCandidates(result.candidates);
-      setSearched(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Search unavailable.");
-    } finally {
-      setBusy("");
-    }
+  useEffect(
+    () => () => {
+      photoRequest.current.sequence += 1;
+      photoRequest.current.controller?.abort();
+    },
+    [],
+  );
+  function cancelPhoto() {
+    photoRequest.current.sequence += 1;
+    photoRequest.current.controller?.abort();
+    setBusy("");
   }
-  async function selectCandidate(item: CatalogCandidate) {
-    setBusy("release");
+  function startReview(value: CatalogCandidate) {
+    cancelPhoto();
+    if (candidate && !candidate.discogsId) setManualDraft(candidate);
+    setCandidate(value);
+    setCopy((current) => ({ ...current, pressingConfirmed: false }));
+    setReviewing(true);
+    setLookup(null);
+    setCamera(false);
+    setDuplicate(false);
+    setAllowDuplicate(false);
     setError("");
-    try {
-      const full = item.discogsId
-        ? await api<CatalogCandidate>("/api/catalog/" + item.discogsId)
-        : item;
-      setCandidate(full);
-      setCopy({ ...DEFAULT_COPY });
-      setDuplicate(false);
-      setAllowDuplicate(false);
-      requestKey.current = null;
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not load that pressing.",
-      );
-    } finally {
-      setBusy("");
-    }
+    requestKey.current = null;
+    requestAnimationFrame(() => {
+      reviewHeading.current?.focus({ preventScroll: true });
+      reviewHeading.current?.scrollIntoView({ block: "start" });
+    });
+  }
+  function enterManual(value = manualDraft) {
+    cancelPhoto();
+    setCandidate(value);
+    setManualDraft(value);
+    setCopy((current) => ({ ...current, pressingConfirmed: false }));
+    setReviewing(true);
+    setCamera(false);
+    setDuplicate(false);
+    setAllowDuplicate(false);
+    setError("");
+    requestKey.current = null;
+  }
+  function openLookup(albums?: AlbumSearchResult, album?: CatalogAlbum) {
+    if (!candidate) return;
+    const search: CatalogSearchDraft =
+      candidate.catalogNumber.trim() && !album
+        ? {
+            mode: "catalogNumber",
+            catalogNumber: candidate.catalogNumber,
+            artist: candidate.artist,
+            title: candidate.title,
+          }
+        : {
+            mode: "details",
+            artist: candidate.artist,
+            title: candidate.title,
+            catalogNumber: candidate.catalogNumber,
+          };
+    setLookup({
+      search,
+      albums: search.mode === "catalogNumber" ? undefined : albums,
+      album,
+    });
   }
   async function identify() {
     if (!photo) return;
+    photoRequest.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = ++photoRequest.current.sequence;
+    photoRequest.current.controller = controller;
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 60000);
     setBusy("photo");
     setError("");
     try {
       let currentPhotoId = photoId;
       if (!currentPhotoId) {
         const prepared = await compressImage(photo);
+        if (controller.signal.aborted) return;
         const form = new FormData();
         form.append("file", prepared);
         const uploaded = await api<{ id: string; url: string }>("/api/photos", {
           method: "POST",
           body: form,
+          signal: controller.signal,
         });
+        if (sequence !== photoRequest.current.sequence) return;
         currentPhotoId = uploaded.id;
         setPhotoId(currentPhotoId);
       }
       const result = await api<PhotoIdentification>("/api/identify", {
         method: "POST",
         body: JSON.stringify({ photoId: currentPhotoId }),
+        signal: controller.signal,
       });
-      setCandidates(result.candidates);
-      setSearched(true);
-      setClue(
-        [result.clues.artist, result.clues.title, result.clues.uncertainty]
-          .filter(Boolean)
-          .join(" · "),
-      );
-      if (!result.candidates.length)
-        setCandidate({
-          ...EMPTY_CANDIDATE,
-          artist: result.clues.artist || "",
-          title: result.clues.title || "",
-          label: result.clues.label || "",
-          catalogNumber: result.clues.catalogNumber || "",
-        });
+      if (sequence !== photoRequest.current.sequence) return;
+      setPhotoResult({ ...result, revision: sequence });
     } catch (err) {
+      if (
+        sequence !== photoRequest.current.sequence ||
+        (controller.signal.aborted && controller.signal.reason !== "timeout")
+      )
+        return;
       setError(
-        (err instanceof Error
-          ? err.message
-          : "Could not identify that photo.") +
+        (controller.signal.reason === "timeout"
+          ? "Recognition took too long."
+          : err instanceof Error
+            ? err.message
+            : "Could not identify that photo.") +
           " Your photo is still here. Retry, or choose Add by hand to complete the details.",
       );
     } finally {
-      setBusy("");
+      window.clearTimeout(timeout);
+      if (sequence === photoRequest.current.sequence) setBusy("");
     }
   }
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!candidate) return;
+    if (!candidate || busy === "save") return;
     setBusy("save");
     setError("");
     requestKey.current ||= crypto.randomUUID();
     try {
+      let attachedPhotoId = photoId;
+      if (photo && !attachedPhotoId) {
+        const prepared = await compressImage(photo);
+        const form = new FormData();
+        form.append("file", prepared);
+        const uploaded = await api<{ id: string }>("/api/photos", {
+          method: "POST",
+          body: form,
+        });
+        attachedPhotoId = uploaded.id;
+        setPhotoId(attachedPhotoId);
+      }
       const result = await api<RecordCopy>("/api/records", {
         method: "POST",
         body: JSON.stringify({
@@ -265,7 +350,7 @@ export function AddView() {
           candidate: { ...candidate, genres: candidate.genres.filter(Boolean) },
           copy,
           allowDuplicate,
-          photoIds: photoId ? [photoId] : [],
+          photoIds: attachedPhotoId ? [attachedPhotoId] : [],
           crateIds,
         }),
       });
@@ -285,25 +370,51 @@ export function AddView() {
   }
   const existing =
     candidate &&
-    data?.records.some((r) =>
+    data?.records.some((record) =>
       candidate.discogsId
-        ? r.discogsId === candidate.discogsId
-        : r.title.toLowerCase() === candidate.title.toLowerCase() &&
-          r.artist.toLowerCase() === candidate.artist.toLowerCase(),
+        ? record.discogsId === candidate.discogsId
+        : record.title.toLowerCase() === candidate.title.toLowerCase() &&
+          record.artist.toLowerCase() === candidate.artist.toLowerCase(),
     );
+  const photoDraft: CatalogCandidate = {
+    ...EMPTY_CANDIDATE,
+    artist: photoResult?.clues.artist || "",
+    title: photoResult?.clues.title || "",
+    label: photoResult?.clues.label || "",
+    catalogNumber: photoResult?.clues.catalogNumber || "",
+  };
+  const photoSearch: CatalogSearchDraft = photoResult?.clues.catalogNumber
+    ? {
+        mode: "catalogNumber",
+        catalogNumber: photoResult.clues.catalogNumber,
+        artist: photoResult.clues.artist || "",
+        title: photoResult.clues.title || "",
+      }
+    : photoResult?.clues.barcode
+      ? {
+          mode: "barcode",
+          barcode: photoResult.clues.barcode,
+          artist: photoResult.clues.artist || "",
+          title: photoResult.clues.title || "",
+        }
+      : {
+          mode: "details",
+          artist: photoResult?.clues.artist || "",
+          title: photoResult?.clues.title || "",
+        };
   return (
     <>
       <PageHeader
         eyebrow="NEW ARRIVALS / MAKE ROOM ON THE SHELF"
         title="Add some wax"
-        description="Find the release. Check the pressing. Make it yours."
+        description="Find the album. Check the pressing. Make it yours."
       />
       <div className="flow-steps">
-        <span className={!candidate ? "current" : "complete"}>
-          <b>{candidate ? <Check size={13} /> : "1"}</b> Find your record
+        <span className={!reviewing ? "current" : "complete"}>
+          <b>{reviewing ? <Check size={13} /> : "1"}</b> Find your record
         </span>
         <i />
-        <span className={candidate ? "current" : ""}>
+        <span className={reviewing ? "current" : ""}>
           <b>2</b> The pressing & your copy
         </span>
         <i />
@@ -311,14 +422,15 @@ export function AddView() {
           <b>3</b> Into the collection
         </span>
       </div>
-      {candidate ? (
+      {reviewing && candidate && (
         <form onSubmit={save} className="review-layout">
           <div className="review-main">
             <button
               type="button"
               className="text-button"
+              disabled={busy === "save"}
               onClick={() => {
-                setCandidate(null);
+                setReviewing(false);
                 setError("");
               }}
             >
@@ -326,9 +438,57 @@ export function AddView() {
             </button>
             <div className="section-title">
               <span>01 / THE RELEASE</span>
-              <h2>Let’s get the details right.</h2>
+              <h2 ref={reviewHeading} tabIndex={-1}>
+                Let’s get the details right.
+              </h2>
             </div>
-            <CandidateFields value={candidate} onChange={setCandidate} />
+            {candidate.discogsId ? (
+              <div className={styles.reviewLookup}>
+                <p>
+                  Catalog details are ready for your review. Check the label,
+                  country, and catalog number against your copy.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy === "save"}
+                  onClick={() => openLookup()}
+                >
+                  Find another pressing
+                </Button>
+              </div>
+            ) : (
+              <ManualCatalogSuggestions
+                artist={candidate.artist}
+                title={candidate.title}
+                onBrowse={(albums) => openLookup(albums)}
+                onAlbum={(album, albums) => openLookup(albums, album)}
+              />
+            )}
+            <CandidateFields
+              value={candidate}
+              onChange={(value) => {
+                setCandidate(value);
+                if (!value.discogsId) setManualDraft(value);
+              }}
+            />
+            {candidate.discogsId &&
+              (manualDraft.artist || manualDraft.title) && (
+                <div className={styles.restore}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy === "save"}
+                    onClick={() => enterManual(manualDraft)}
+                  >
+                    <ArrowLeft size={14} /> Restore manual details
+                  </button>
+                  <p className="small-note">
+                    Your condition, notes, photos, and crate choices stay with
+                    this copy.
+                  </p>
+                </div>
+              )}
             <div className="section-title">
               <span>02 / YOUR COPY</span>
               <h2>Same record. Your story.</h2>
@@ -342,9 +502,9 @@ export function AddView() {
                     <input
                       type="checkbox"
                       checked={crateIds.includes(crate.id)}
-                      onChange={(e) =>
+                      onChange={(event) =>
                         setCrateIds(
-                          e.target.checked
+                          event.target.checked
                             ? [...crateIds, crate.id]
                             : crateIds.filter((id) => id !== crate.id),
                         )
@@ -361,7 +521,7 @@ export function AddView() {
                 <input
                   type="checkbox"
                   checked={allowDuplicate}
-                  onChange={(e) => setAllowDuplicate(e.target.checked)}
+                  onChange={(event) => setAllowDuplicate(event.target.checked)}
                 />
                 <span>
                   <strong>Looks like this one’s already on your shelf.</strong>
@@ -411,264 +571,229 @@ export function AddView() {
             </p>
           </aside>
         </form>
-      ) : (
-        <>
-          <div className="capture-tabs">
-            {[
-              { id: "search", label: "Search the catalog", icon: Search },
-              { id: "scan", label: "Scan a barcode", icon: ScanLine },
-              { id: "photo", label: "Snap a photo", icon: Camera },
-              { id: "manual", label: "Add by hand", icon: PencilLine },
-            ].map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                className={mode === id ? "active" : ""}
-                onClick={() => {
-                  setMode(id as Mode);
-                  setCamera(false);
-                  setError("");
-                  setSearched(false);
-                  setClue("");
-                }}
-              >
-                <Icon size={20} />
-                <span>{label}</span>
-              </button>
-            ))}
+      )}
+      <div hidden={reviewing}>
+        {candidate && (
+          <div className={styles.resume}>
+            <span>
+              Your draft of <strong>{candidate.title || "this record"}</strong>{" "}
+              is still here.
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setReviewing(true)}
+            >
+              Return to your draft <ArrowRight size={14} />
+            </button>
           </div>
+        )}
+        <div className="capture-tabs">
+          {[
+            { id: "search", label: "Search the catalog", icon: Search },
+            { id: "scan", label: "Scan a barcode", icon: ScanLine },
+            { id: "photo", label: "Snap a photo", icon: Camera },
+            { id: "manual", label: "Add by hand", icon: PencilLine },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              type="button"
+              key={id}
+              className={mode === id ? "active" : ""}
+              aria-pressed={mode === id}
+              onClick={() => {
+                cancelPhoto();
+                setMode(id as Mode);
+                setCamera(false);
+                setError("");
+              }}
+            >
+              <Icon size={20} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+        <div hidden={mode !== "search"}>
+          <div className="section-title">
+            <span>THE DIG STARTS HERE</span>
+            <h2>What are we looking for?</h2>
+          </div>
+          <CatalogFinder
+            active={!reviewing && mode === "search"}
+            key={params.toString()}
+            initialSearch={wizardSearch}
+            initialAlbum={wizardAlbum}
+            autoSearch={Boolean(wizardArtist || wizardTitle)}
+            onSelect={startReview}
+            onManual={() => enterManual()}
+          />
+        </div>
+        <div hidden={mode !== "scan"}>
           <section className="capture-panel">
-            {mode === "search" && (
-              <>
-                <span className="eyebrow">THE DIG STARTS HERE</span>
-                <h2>What are we looking for?</h2>
-                <p>
-                  Search an artist, a record title, or the numbers on the spine.
-                </p>
-                <form
-                  className="catalog-search"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void search({ [searchType]: query });
-                  }}
-                >
-                  <select
-                    aria-label="Catalog search type"
-                    value={searchType}
-                    onChange={(e) => setSearchType(e.target.value)}
-                  >
-                    <option value="query">Everything</option>
-                    <option value="artist">Artist</option>
-                    <option value="title">Title</option>
-                    <option value="catalogNumber">Catalog no.</option>
-                  </select>
-                  <input
-                    required
-                    aria-label="Search the record catalog"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Artist, album, or catalog number…"
-                  />
-                  <Button type="submit" busy={busy === "search"}>
-                    <Search size={17} /> Search
-                  </Button>
-                </form>
-              </>
+            <span className="eyebrow">A QUICK FLIP TO THE BACK</span>
+            <h2>Scan it. Then check it.</h2>
+            <p>
+              A barcode can match several pressings. You’ll choose the right one
+              next.
+            </p>
+            {camera && !reviewing ? (
+              <BarcodeCamera
+                onClose={() => setCamera(false)}
+                onResult={(value) => {
+                  setBarcode(value);
+                  setCamera(false);
+                  setScanSearch({ value, key: Date.now() });
+                }}
+              />
+            ) : (
+              <Button type="button" onClick={() => setCamera(true)}>
+                <Camera size={18} /> Open camera
+              </Button>
             )}
-            {mode === "scan" && (
-              <>
-                <span className="eyebrow">A QUICK FLIP TO THE BACK</span>
-                <h2>Scan it. Then check it.</h2>
-                <p>
-                  A barcode can match several pressings. You’ll choose the right
-                  one next.
-                </p>
-                {camera ? (
-                  <BarcodeCamera
-                    onClose={() => setCamera(false)}
-                    onResult={(value) => {
-                      setBarcode(value);
-                      setCamera(false);
-                      void search({ barcode: value });
-                    }}
-                  />
+            <form
+              className="barcode-manual"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setScanSearch({ value: barcode, key: Date.now() });
+              }}
+            >
+              <Field label="Or type the barcode">
+                <input
+                  value={barcode}
+                  inputMode="numeric"
+                  required
+                  maxLength={40}
+                  onChange={(event) => setBarcode(event.target.value)}
+                  placeholder="Keep any leading zeros"
+                />
+              </Field>
+              <Button variant="secondary" type="submit">
+                Find matches <ArrowRight size={16} />
+              </Button>
+            </form>
+          </section>
+          {scanSearch && (
+            <CatalogFinder
+              active={!reviewing && mode === "scan"}
+              key={scanSearch.key}
+              initialSearch={{ mode: "barcode", barcode: scanSearch.value }}
+              autoSearch
+              onSelect={startReview}
+              onManual={() => enterManual()}
+            />
+          )}
+        </div>
+        <div hidden={mode !== "photo"}>
+          <section className="capture-panel">
+            <span className="eyebrow">LET THE SLEEVE DO THE TALKING</span>
+            <h2>Recognize a record.</h2>
+            <p>
+              Photograph the cover or label in good light. Correct the clues
+              below, compare the pressings, and choose what matches your copy.
+            </p>
+            <div className="photo-capture">
+              <label
+                className={"photo-drop " + (photoPreview ? "has-photo" : "")}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="Your selected record photo" />
                 ) : (
-                  <Button onClick={() => setCamera(true)}>
-                    <Camera size={18} /> Open camera
-                  </Button>
+                  <>
+                    <ImagePlus size={35} />
+                    <strong>Choose a photo or open your camera</strong>
+                    <span>JPEG, PNG, or WebP · we’ll size it for you</span>
+                  </>
                 )}
-                <form
-                  className="barcode-manual"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void search({ barcode });
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  onChange={(event) => {
+                    cancelPhoto();
+                    setPhoto(event.target.files?.[0] || null);
+                    setPhotoId(null);
+                    setPhotoResult(null);
+                    setError("");
                   }}
-                >
-                  <Field label="Or type the barcode">
-                    <input
-                      value={barcode}
-                      inputMode="numeric"
-                      required
-                      onChange={(e) => setBarcode(e.target.value)}
-                      placeholder="Keep any leading zeros"
-                    />
-                  </Field>
-                  <Button
-                    variant="secondary"
-                    type="submit"
-                    busy={busy === "search"}
-                  >
-                    Find matches <ArrowRight size={16} />
-                  </Button>
-                </form>
-              </>
-            )}
-            {mode === "photo" && (
-              <>
-                <span className="eyebrow">LET THE SLEEVE DO THE TALKING</span>
-                <h2>Recognize a record.</h2>
-                <p>
-                  Photograph the cover or label in good light. You’ll review the
-                  matches before anything is saved.
-                </p>
-                <div className="photo-capture">
-                  <label
-                    className={
-                      "photo-drop " + (photoPreview ? "has-photo" : "")
-                    }
-                  >
-                    {photoPreview ? (
-                      <img
-                        src={photoPreview}
-                        alt="Your selected record photo"
-                      />
-                    ) : (
-                      <>
-                        <ImagePlus size={35} />
-                        <strong>Choose a photo or open your camera</strong>
-                        <span>JPEG, PNG, or WebP · we’ll size it for you</span>
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      capture="environment"
-                      onChange={(e) => {
-                        setPhoto(e.target.files?.[0] || null);
-                        setPhotoId(null);
-                        setSearched(false);
-                      }}
-                    />
-                  </label>
-                  {photo && (
-                    <Button
-                      onClick={() => void identify()}
-                      busy={busy === "photo"}
-                    >
-                      <Camera size={17} />{" "}
-                      {busy === "photo"
-                        ? "Looking closely…"
-                        : "Identify this record"}
-                    </Button>
-                  )}
-                </div>
-              </>
-            )}
-            {mode === "manual" && (
-              <>
-                <span className="eyebrow">YOU KNOW YOUR RECORDS</span>
-                <h2>Keep it simple.</h2>
-                <p>
-                  Start with the artist and title. Add the finer details now, or
-                  come back when you’ve had a closer look.
-                </p>
+                />
+              </label>
+              {photo && (
                 <Button
-                  onClick={() => {
-                    setCandidate({ ...EMPTY_CANDIDATE });
-                    setCopy({ ...DEFAULT_COPY });
-                  }}
+                  type="button"
+                  onClick={() => void identify()}
+                  busy={busy === "photo"}
                 >
-                  Enter the details <PencilLine size={17} />
+                  <Camera size={17} />
+                  {busy === "photo"
+                    ? "Looking closely…"
+                    : "Identify this record"}
                 </Button>
-              </>
-            )}
+              )}
+            </div>
             <ErrorNotice>{error}</ErrorNotice>
           </section>
-          {clue && <div className="notice">Photo clues: {clue}</div>}
-          {busy === "release" && (
-            <div className="inline-loading" role="status">
-              <LoaderCircle className="spin" size={20} /> Pulling the pressing
-              details…
-            </div>
-          )}
-          {searched && (
-            <section className="candidate-results">
-              <div className="section-title result-title">
-                <div>
-                  <span>THE SEARCH PARTY</span>
-                  <h2>
-                    {candidates.length
-                      ? candidates.length + " possible matches."
-                      : "No clear match this time."}
-                  </h2>
-                </div>
-                <Button
-                  variant="quiet"
-                  onClick={() => setCandidate({ ...EMPTY_CANDIDATE })}
-                >
-                  Add by hand <PencilLine size={15} />
-                </Button>
-              </div>
-              {!candidates.length && (
+          {photoResult && (
+            <>
+              <div className="notice">
+                <strong>Photo clues, ready to refine.</strong>
                 <p>
-                  Try the label or catalog number, take a clearer photo, or
-                  enter what you know.
+                  {[
+                    photoResult.clues.artist,
+                    photoResult.clues.title,
+                    photoResult.clues.uncertainty,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
-              )}
-              <div className="candidate-grid">
-                {candidates.map((item, index) => (
-                  <article
-                    className="candidate-card"
-                    key={item.discogsId || index}
-                  >
-                    <Cover record={item} />
-                    <div>
-                      <h3>{item.title}</h3>
-                      <p>{item.artist}</p>
-                      <small>
-                        {[
-                          item.year
-                            ? `Pressing: ${item.year}`
-                            : "Pressing year unknown",
-                          item.country,
-                          item.label,
-                          item.catalogNumber,
-                          item.format,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </small>
-                      <SourceCredit sourceUrl={item.sourceUrl} />
-                      <Button
-                        variant="secondary"
-                        busy={busy === "release"}
-                        onClick={() => void selectCandidate(item)}
-                      >
-                        Review this pressing <ArrowRight size={14} />
-                      </Button>
-                    </div>
-                  </article>
-                ))}
+                <p>
+                  These are suggestions. Edit the search clues or narrow by
+                  country, label, and year below.
+                </p>
               </div>
-            </section>
+              <CatalogFinder
+                active={!reviewing && mode === "photo"}
+                key={photoResult.revision}
+                initialSearch={photoSearch}
+                initialCandidates={photoResult.candidates}
+                onSelect={startReview}
+                onManual={() => enterManual(photoDraft)}
+              />
+            </>
           )}
-          <div className="capture-footnote">
-            <Disc3 size={20} />
+        </div>
+        <div hidden={mode !== "manual"}>
+          <section className="capture-panel">
+            <span className="eyebrow">YOU KNOW YOUR RECORDS</span>
+            <h2>Keep it simple.</h2>
             <p>
-              Different pressing? Different story. We’ll keep your physical
-              copies separate, even when the album is the same.
+              Start with the artist and title. We’ll look for catalog matches
+              while you fill in your copy. Choose a match when it’s right, or
+              keep your own details.
             </p>
-          </div>
-        </>
+            <Button type="button" onClick={() => enterManual()}>
+              Enter the details <PencilLine size={17} />
+            </Button>
+          </section>
+        </div>
+        <div className="capture-footnote">
+          <Disc3 size={20} />
+          <p>
+            Different pressing? Different story. We’ll keep your physical copies
+            separate, even when the album is the same.
+          </p>
+        </div>
+      </div>
+      {lookup && (
+        <CatalogFinderDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setLookup(null);
+          }}
+          initialSearch={lookup.search}
+          initialAlbums={lookup.albums}
+          initialAlbum={lookup.album}
+          autoSearch={!lookup.albums && !lookup.album}
+          onSelect={startReview}
+        />
       )}
     </>
   );

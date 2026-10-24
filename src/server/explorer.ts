@@ -126,7 +126,7 @@ export async function fetchExplorerRelease(
   id: number,
 ): Promise<ExplorerRelease> {
   checkedId(id);
-  return cached(`explorer:v1:release:${id}`, async () =>
+  return cached(`explorer:v2:release:${id}`, async () =>
     normalizeExplorerRelease(await provider(`/releases/${id}`), id),
   );
 }
